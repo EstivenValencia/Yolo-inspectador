@@ -56,8 +56,10 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
     if (!viewport) return;
 
     const onWheel = (e: WheelEvent) => {
+      // Check for Ctrl key (standard for zoom)
       if (e.ctrlKey) {
         e.preventDefault();
+        e.stopPropagation(); // CRITICAL for Firefox to prevent browser zoom
         
         // Exponential zoom factor
         const s = Math.exp(-e.deltaY * 0.002);
