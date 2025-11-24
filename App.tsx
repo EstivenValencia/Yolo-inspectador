@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { SetupScreen } from './components/SetupScreen';
 import { ImageViewer } from './components/ImageViewer';
 import { DetailPanel } from './components/DetailPanel';
 import { ImageAsset, YoloLabel } from './types';
 import { parseYoloString, serializeYoloString } from './utils/yoloHelper';
-import { ArrowLeft, ArrowRight, Image as ImageIcon, GripVertical } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Image as ImageIcon, GripVertical, Filter } from 'lucide-react';
 
 const App: React.FC = () => {
   const [isSetup, setIsSetup] = useState(false);
@@ -19,6 +19,7 @@ const App: React.FC = () => {
   const [currentLabelIdx, setCurrentLabelIdx] = useState(0);
   const [panelWidth, setPanelWidth] = useState(400); // Default width
   const [isResizing, setIsResizing] = useState(false);
+  const [filterClassId, setFilterClassId] = useState<number>(-1); // -1 = All
   
   // Working State (Parsed labels for current image)
   const [currentLabels, setCurrentLabels] = useState<YoloLabel[]>([]);
@@ -73,12 +74,43 @@ const App: React.FC = () => {
     setIsResizing(true);
   };
 
+  // --- Filtering Logic ---
+  const filteredImages = useMemo(() => {
+    if (filterClassId === -1) return images;
 
-  // When image changes, parse labels
+    return images.filter(img => {
+       const key = img.name.replace(/\.[^/.]+$/, "");
+       const rawContent = labelsRaw.get(key);
+       if (!rawContent) return false;
+       
+       // We must parse to check the class ID accurately
+       const labels = parseYoloString(rawContent);
+       return labels.some(l => l.classId === filterClassId);
+    });
+  }, [images, labelsRaw, filterClassId]);
+
+  // Reset pagination when filter changes
   useEffect(() => {
-    if (!isSetup || images.length === 0) return;
+    setCurrentImageIdx(0);
+  }, [filterClassId]);
 
-    const img = images[currentImageIdx];
+
+  // --- Data Loading when Image Changes ---
+  useEffect(() => {
+    if (!isSetup || filteredImages.length === 0) {
+      setCurrentLabels([]);
+      setCurrentLabelIdx(-1);
+      return;
+    }
+
+    // Safety check for index out of bounds (can happen when list shrinks)
+    const effectiveIdx = Math.min(currentImageIdx, filteredImages.length - 1);
+    if (effectiveIdx !== currentImageIdx) {
+        setCurrentImageIdx(effectiveIdx);
+        return; 
+    }
+
+    const img = filteredImages[effectiveIdx];
     // Remove extension for key lookup
     const key = img.name.replace(/\.[^/.]+$/, "");
     
@@ -86,24 +118,36 @@ const App: React.FC = () => {
     const parsed = parseYoloString(rawContent);
     
     setCurrentLabels(parsed);
-    // Reset to first label only if we have labels and the index is out of bounds or negative
+    
+    // Smart Label Selection
     if (parsed.length > 0) {
-       // Try to keep index if possible, otherwise reset
-       if (currentLabelIdx >= parsed.length || currentLabelIdx < 0) {
-         setCurrentLabelIdx(0);
+       if (filterClassId !== -1) {
+          // If filtering, try to select the first label that matches the filter
+          const matchIdx = parsed.findIndex(l => l.classId === filterClassId);
+          if (matchIdx !== -1) {
+            setCurrentLabelIdx(matchIdx);
+          } else {
+             // Should rarely happen if filter logic is correct, unless labels changed
+             setCurrentLabelIdx(0);
+          }
+       } else {
+           // Default behavior: keep index if valid
+           if (currentLabelIdx >= parsed.length || currentLabelIdx < 0) {
+             setCurrentLabelIdx(0);
+           }
        }
     } else {
       setCurrentLabelIdx(-1);
     }
-  }, [currentImageIdx, images, labelsRaw, isSetup]); // Removed currentLabelIdx from dependency to avoid loop resets
+  }, [currentImageIdx, filteredImages, labelsRaw, isSetup, filterClassId]);
 
 
-  // Navigation Handlers
+  // --- Navigation Handlers ---
   const nextImage = useCallback(() => {
-    if (currentImageIdx < images.length - 1) {
+    if (currentImageIdx < filteredImages.length - 1) {
       setCurrentImageIdx(prev => prev + 1);
     }
-  }, [currentImageIdx, images.length]);
+  }, [currentImageIdx, filteredImages.length]);
 
   const prevImage = useCallback(() => {
     if (currentImageIdx > 0) {
@@ -121,34 +165,38 @@ const App: React.FC = () => {
     setCurrentLabelIdx(prev => (prev - 1 + currentLabels.length) % currentLabels.length);
   }, [currentLabels.length]);
 
-  // Update logic
+  // --- Update Logic ---
   const handleLabelUpdate = (updatedLabel: YoloLabel) => {
     const newLabels = [...currentLabels];
-    // Ensure we are updating the correct index, usually currentLabelIdx
-    // However, if called from ImageViewer resizing, we might need to know which index.
-    // For now, we assume we only edit the selected one.
+    
+    // We assume we are editing the label at currentLabelIdx or finding it
+    // In this simple app, currentLabelIdx is the source of truth for "selected"
     if (currentLabelIdx >= 0 && currentLabelIdx < newLabels.length) {
         newLabels[currentLabelIdx] = updatedLabel;
         setCurrentLabels(newLabels);
         
-        // Update raw map immediately so it persists if we switch images (Auto-save to memory)
-        const imgKey = images[currentImageIdx].name.replace(/\.[^/.]+$/, "");
-        const newRaw = serializeYoloString(newLabels);
-        
-        const newLabelsMap = new Map(labelsRaw);
-        newLabelsMap.set(imgKey, newRaw);
-        setLabelsRaw(newLabelsMap);
+        // Update raw map immediately
+        if (filteredImages[currentImageIdx]) {
+            const imgKey = filteredImages[currentImageIdx].name.replace(/\.[^/.]+$/, "");
+            const newRaw = serializeYoloString(newLabels);
+            
+            const newLabelsMap = new Map(labelsRaw);
+            newLabelsMap.set(imgKey, newRaw);
+            setLabelsRaw(newLabelsMap);
 
-        // Mark as unsaved (for disk write)
-        const newUnsaved = new Map(unsavedMap);
-        newUnsaved.set(imgKey, true);
-        setUnsavedMap(newUnsaved);
+            // Mark as unsaved
+            const newUnsaved = new Map(unsavedMap);
+            newUnsaved.set(imgKey, true);
+            setUnsavedMap(newUnsaved);
+        }
     }
   };
 
-  // Download Handler
+  // --- Download Handler ---
   const handleDownload = () => {
-    const imgKey = images[currentImageIdx].name.replace(/\.[^/.]+$/, "");
+    if (!filteredImages[currentImageIdx]) return;
+
+    const imgKey = filteredImages[currentImageIdx].name.replace(/\.[^/.]+$/, "");
     const content = labelsRaw.get(imgKey) || "";
     
     const blob = new Blob([content], { type: 'text/plain' });
@@ -167,13 +215,12 @@ const App: React.FC = () => {
     setUnsavedMap(newUnsaved);
   };
 
-  // Keyboard Shortcuts
+  // --- Keyboard Shortcuts ---
   useEffect(() => {
     if (!isSetup) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-        // Ignore if input focused (though we mainly use select)
-        if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+        if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
 
         switch (e.key.toLowerCase()) {
             case 'd': // Next Image
@@ -196,8 +243,6 @@ const App: React.FC = () => {
                 e.preventDefault();
                 prevLabel();
                 break;
-            case 'save': // Catch all for save if needed
-                break;
         }
 
         if (e.key === 's' || e.key === 'S') {
@@ -217,9 +262,10 @@ const App: React.FC = () => {
     return <SetupScreen onComplete={handleSetupComplete} />;
   }
 
-  const currentImage = images[currentImageIdx];
+  // Derived references for Render
+  const currentImage = filteredImages[currentImageIdx];
   const currentKey = currentImage?.name.replace(/\.[^/.]+$/, "");
-  const hasUnsaved = unsavedMap.has(currentKey);
+  const hasUnsaved = currentKey ? unsavedMap.has(currentKey) : false;
 
   return (
     <div className="h-screen w-screen flex flex-col bg-slate-950 overflow-hidden">
@@ -232,71 +278,103 @@ const App: React.FC = () => {
             </div>
             <div>
                 <h1 className="font-bold text-slate-100 text-sm leading-tight">YOLO Inspector</h1>
-                <p className="text-xs text-slate-500">{currentImage?.name}</p>
+                <p className="text-xs text-slate-500">
+                  {currentImage ? currentImage.name : 'No images found'}
+                </p>
             </div>
         </div>
 
-        <div className="flex items-center gap-4 bg-slate-800 p-1 rounded-lg border border-slate-700">
-            <button 
-                onClick={prevImage}
-                disabled={currentImageIdx === 0}
-                className="p-2 hover:bg-slate-700 rounded text-slate-300 disabled:opacity-30 transition-colors"
-                title="Previous Image (A)"
-            >
-                <ArrowLeft size={18} />
-            </button>
-            <span className="text-sm font-mono text-slate-400 min-w-[80px] text-center">
-                {currentImageIdx + 1} / {images.length}
-            </span>
-            <button 
-                onClick={nextImage}
-                disabled={currentImageIdx === images.length - 1}
-                className="p-2 hover:bg-slate-700 rounded text-slate-300 disabled:opacity-30 transition-colors"
-                title="Next Image (D)"
-            >
-                <ArrowRight size={18} />
-            </button>
+        <div className="flex items-center gap-4">
+             {/* Filter Dropdown */}
+             <div className="flex items-center gap-2 mr-2 border-r border-slate-700 pr-4">
+                <Filter size={16} className="text-slate-400" />
+                <span className="text-xs text-slate-400 font-semibold uppercase hidden sm:block">Filter:</span>
+                <select 
+                    value={filterClassId} 
+                    onChange={(e) => setFilterClassId(parseInt(e.target.value))}
+                    className="bg-slate-800 text-slate-200 text-xs p-1.5 rounded border border-slate-700 focus:ring-1 focus:ring-indigo-500 outline-none max-w-[150px] cursor-pointer"
+                >
+                    <option value={-1}>All Defects</option>
+                    {classes.map((cls, idx) => (
+                        <option key={idx} value={idx}>{idx}: {cls}</option>
+                    ))}
+                </select>
+            </div>
+
+            <div className="flex items-center gap-4 bg-slate-800 p-1 rounded-lg border border-slate-700">
+                <button 
+                    onClick={prevImage}
+                    disabled={filteredImages.length === 0 || currentImageIdx === 0}
+                    className="p-2 hover:bg-slate-700 rounded text-slate-300 disabled:opacity-30 transition-colors"
+                    title="Previous Image (A)"
+                >
+                    <ArrowLeft size={18} />
+                </button>
+                <span className="text-sm font-mono text-slate-400 min-w-[80px] text-center">
+                    {filteredImages.length > 0 ? currentImageIdx + 1 : 0} / {filteredImages.length}
+                </span>
+                <button 
+                    onClick={nextImage}
+                    disabled={filteredImages.length === 0 || currentImageIdx === filteredImages.length - 1}
+                    className="p-2 hover:bg-slate-700 rounded text-slate-300 disabled:opacity-30 transition-colors"
+                    title="Next Image (D)"
+                >
+                    <ArrowRight size={18} />
+                </button>
+            </div>
         </div>
 
         <div className="w-40 flex justify-end">
-            <span className="text-xs text-slate-600">v1.2.0</span>
+            <span className="text-xs text-slate-600">v1.3.0</span>
         </div>
       </header>
 
       {/* Main Content Area */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left: Image Viewer */}
-        <ImageViewer 
-            image={currentImage}
-            labels={currentLabels}
-            currentLabelIndex={currentLabelIdx}
-            classes={classes}
-            onSelectLabel={setCurrentLabelIdx}
-            onUpdateLabel={handleLabelUpdate}
-        />
+        {filteredImages.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-slate-500">
+                <ImageIcon size={48} className="mb-4 opacity-50" />
+                <p className="text-lg font-semibold">No images found</p>
+                {filterClassId !== -1 && (
+                    <p className="text-sm">Try changing the filter to "All Defects" or selecting a different class.</p>
+                )}
+            </div>
+        ) : (
+            <>
+                {/* Left: Image Viewer */}
+                <ImageViewer 
+                    image={currentImage}
+                    labels={currentLabels}
+                    currentLabelIndex={currentLabelIdx}
+                    classes={classes}
+                    onSelectLabel={setCurrentLabelIdx}
+                    onUpdateLabel={handleLabelUpdate}
+                />
 
-        {/* Resizer Handle */}
-        <div 
-          onMouseDown={startResizing}
-          className={`w-2 bg-slate-800 hover:bg-indigo-500 cursor-col-resize flex items-center justify-center transition-colors z-30 shrink-0 ${isResizing ? 'bg-indigo-500' : ''}`}
-        >
-           <div className="h-8 w-1 rounded-full bg-slate-600/50"></div>
-        </div>
+                {/* Resizer Handle */}
+                <div 
+                onMouseDown={startResizing}
+                className={`w-2 bg-slate-800 hover:bg-indigo-500 cursor-col-resize flex items-center justify-center transition-colors z-30 shrink-0 ${isResizing ? 'bg-indigo-500' : ''}`}
+                >
+                <div className="h-8 w-1 rounded-full bg-slate-600/50"></div>
+                </div>
 
-        {/* Right: Details & Zoom */}
-        <DetailPanel 
-            width={panelWidth}
-            currentImage={currentImage}
-            currentLabel={currentLabels[currentLabelIdx] || null}
-            classes={classes}
-            totalLabels={currentLabels.length}
-            currentLabelIndex={currentLabelIdx}
-            onNextLabel={nextLabel}
-            onPrevLabel={prevLabel}
-            onUpdateLabel={handleLabelUpdate}
-            onDownloadLabels={handleDownload}
-            hasUnsavedChanges={hasUnsaved}
-        />
+                {/* Right: Details & Zoom */}
+                <DetailPanel 
+                    width={panelWidth}
+                    currentImage={currentImage}
+                    currentLabel={currentLabels[currentLabelIdx] || null}
+                    classes={classes}
+                    totalLabels={currentLabels.length}
+                    currentLabelIndex={currentLabelIdx}
+                    onNextLabel={nextLabel}
+                    onPrevLabel={prevLabel}
+                    onUpdateLabel={handleLabelUpdate}
+                    onDownloadLabels={handleDownload}
+                    hasUnsavedChanges={hasUnsaved}
+                />
+            </>
+        )}
       </div>
     </div>
   );
