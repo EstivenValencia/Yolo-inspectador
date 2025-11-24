@@ -1,0 +1,5 @@
+{
+  "name": "YOLO Defect Inspector",
+  "description": "A specialized tool for inspecting, validating, and correcting YOLO dataset annotations with zoom capabilities.",
+  "requestFramePermissions": []
+}
