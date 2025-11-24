@@ -37,7 +37,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   useEffect(() => {
     if (!currentImage) return;
     const img = new Image();
-    img.crossOrigin = "anonymous";
+    // Removed crossOrigin="anonymous" to allow local file/blob usage without CORS errors
     img.src = currentImage.url;
     img.onload = () => setImgElement(img);
   }, [currentImage]);
