@@ -4,7 +4,7 @@ import { ImageViewer } from './components/ImageViewer';
 import { DetailPanel } from './components/DetailPanel';
 import { ImageAsset, YoloLabel } from './types';
 import { parseYoloString, serializeYoloString } from './utils/yoloHelper';
-import { ArrowLeft, ArrowRight, Image as ImageIcon, GripVertical, Filter } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Image as ImageIcon, Filter } from 'lucide-react';
 
 const App: React.FC = () => {
   const [isSetup, setIsSetup] = useState(false);
@@ -111,6 +111,8 @@ const App: React.FC = () => {
     }
 
     const img = filteredImages[effectiveIdx];
+    if (!img) return; // Extra safety
+
     // Remove extension for key lookup
     const key = img.name.replace(/\.[^/.]+$/, "");
     
@@ -325,13 +327,14 @@ const App: React.FC = () => {
         </div>
 
         <div className="w-40 flex justify-end">
-            <span className="text-xs text-slate-600">v1.3.0</span>
+            <span className="text-xs text-slate-600">v1.3.1</span>
         </div>
       </header>
 
       {/* Main Content Area */}
       <div className="flex-1 flex overflow-hidden">
-        {filteredImages.length === 0 ? (
+        {/* Guard against race condition where filteredImages has changed but index hasn't updated yet */}
+        {(filteredImages.length === 0 || !currentImage) ? (
             <div className="flex-1 flex flex-col items-center justify-center text-slate-500">
                 <ImageIcon size={48} className="mb-4 opacity-50" />
                 <p className="text-lg font-semibold">No images found</p>

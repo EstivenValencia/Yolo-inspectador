@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Upload, FolderInput, FileText, AlertCircle } from 'lucide-react';
 import { ImageAsset } from '../types';
 
@@ -15,6 +15,18 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const labelInputRef = useRef<HTMLInputElement>(null);
   const classInputRef = useRef<HTMLInputElement>(null);
+
+  // Set webkitdirectory attributes manually to avoid React warnings/errors
+  useEffect(() => {
+    if (imageInputRef.current) {
+      imageInputRef.current.setAttribute("webkitdirectory", "true");
+      imageInputRef.current.setAttribute("directory", "true");
+    }
+    if (labelInputRef.current) {
+      labelInputRef.current.setAttribute("webkitdirectory", "true");
+      labelInputRef.current.setAttribute("directory", "true");
+    }
+  }, []);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -90,9 +102,6 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
             </div>
             <input
               type="file"
-              // @ts-ignore - webkitdirectory is non-standard but supported in modern browsers
-              webkitdirectory="" 
-              directory=""
               multiple
               ref={imageInputRef}
               onChange={handleImageUpload}
@@ -116,9 +125,6 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
             </div>
             <input
               type="file"
-               // @ts-ignore
-              webkitdirectory=""
-              directory=""
               multiple
               ref={labelInputRef}
               onChange={handleLabelUpload}

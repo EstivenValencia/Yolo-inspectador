@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { YoloLabel, ImageAsset } from '../types';
-import { ChevronLeft, ChevronRight, Save, Download, AlertTriangle, Tag, MousePointerClick } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Save, AlertTriangle, Tag, MousePointerClick } from 'lucide-react';
 import { getColor } from '../utils/yoloHelper';
 
 interface DetailPanelProps {
