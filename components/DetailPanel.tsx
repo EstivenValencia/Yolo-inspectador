@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { YoloLabel, ImageAsset } from '../types';
-import { ChevronLeft, ChevronRight, Save, AlertTriangle, Tag, MousePointerClick, Maximize2, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, AlertTriangle, Tag, MousePointerClick, Maximize2, Trash2, Info } from 'lucide-react';
 import { getColor } from '../utils/yoloHelper';
 
 interface DetailPanelProps {
@@ -14,8 +14,6 @@ interface DetailPanelProps {
   onPrevLabel: () => void;
   onUpdateLabel: (updatedLabel: YoloLabel) => void;
   onDeleteLabel: () => void;
-  onDownloadLabels: () => void;
-  hasUnsavedChanges: boolean;
 }
 
 export const DetailPanel: React.FC<DetailPanelProps> = ({
@@ -29,8 +27,6 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   onPrevLabel,
   onUpdateLabel,
   onDeleteLabel,
-  onDownloadLabels,
-  hasUnsavedChanges
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const zoomContainerRef = useRef<HTMLDivElement>(null);
@@ -55,7 +51,6 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   useEffect(() => {
     if (!currentImage) return;
     const img = new Image();
-    // Removed crossOrigin="anonymous" to allow local file/blob usage without CORS errors
     img.src = currentImage.url;
     img.onload = () => setImgElement(img);
   }, [currentImage]);
@@ -77,47 +72,32 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     const lblTop = currentLabel.y - currentLabel.h / 2;
     const lblBottom = currentLabel.y + currentLabel.h / 2;
 
-    // Target Full Image (0-1 coords)
-    const imgLeft = 0;
-    const imgRight = 1;
-    const imgTop = 0;
-    const imgBottom = 1;
+    const imgLeft = 0; const imgRight = 1; const imgTop = 0; const imgBottom = 1;
 
-    // Interpolation factor t (0 to 1)
     const t = contextPadding / 100;
 
-    // Interpolate edges
-    // Edge(t) = LabelEdge + (TargetEdge - LabelEdge) * t
     const cLeft = lblLeft + (imgLeft - lblLeft) * t;
     const cRight = lblRight + (imgRight - lblRight) * t;
     const cTop = lblTop + (imgTop - lblTop) * t;
     const cBottom = lblBottom + (imgBottom - lblBottom) * t;
 
-    // Convert back to pixels
     const pxLeft = Math.max(0, cLeft * imgW);
     const pxTop = Math.max(0, cTop * imgH);
     const pxWidth = Math.min(imgW, (cRight * imgW) - pxLeft);
     const pxHeight = Math.min(imgH, (cBottom * imgH) - pxTop);
 
-    // Set canvas size
     canvasRef.current.width = Math.max(1, pxWidth);
     canvasRef.current.height = Math.max(1, pxHeight);
 
     ctx.clearRect(0, 0, pxWidth, pxHeight);
-    
-    // drawImage(img, sx, sy, sWidth, sHeight, dx, dy, dWidth, dHeight)
     ctx.drawImage(imgElement, pxLeft, pxTop, pxWidth, pxHeight, 0, 0, pxWidth, pxHeight);
 
-    // Draw a rectangle on the crop to show the defect
-    // Defect coordinates relative to the cropped canvas
     const boxX = (currentLabel.x * imgW) - (currentLabel.w * imgW) / 2 - pxLeft;
     const boxY = (currentLabel.y * imgH) - (currentLabel.h * imgH) / 2 - pxTop;
     const boxW = currentLabel.w * imgW;
     const boxH = currentLabel.h * imgH;
 
-    // Use specific class color
     ctx.strokeStyle = getColor(currentLabel.classId);
-    // Line width proportional to the view width so it's visible
     ctx.lineWidth = Math.max(2, pxWidth / 150); 
     ctx.strokeRect(boxX, boxY, boxW, boxH);
 
@@ -129,28 +109,22 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     if (!container) return;
 
     const onWheel = (e: WheelEvent) => {
-        // Only Zoom if Ctrl is pressed (consistent with main viewer)
         if (e.ctrlKey || e.metaKey) {
             e.preventDefault();
             e.stopPropagation();
-            
-            // Normalize delta (Firefox/Edge support)
             let delta = e.deltaY;
             if (e.deltaMode === 1) delta *= 33;
             if (e.deltaMode === 2) delta *= 800;
-
             const s = Math.exp(-delta * 0.0015);
-            setZoom(prev => Math.min(Math.max(1, prev * s), 20)); // Max 20x, Min 1x
+            setZoom(prev => Math.min(Math.max(1, prev * s), 20)); 
         }
     };
-
     container.addEventListener('wheel', onWheel, { passive: false });
     return () => container.removeEventListener('wheel', onWheel);
   }, []);
 
   // --- Pan Logic for Right Panel ---
   const handleMouseDown = (e: React.MouseEvent) => {
-      // Allow panning with left or middle mouse
       e.preventDefault();
       setIsPanning(true);
       dragStart.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
@@ -162,10 +136,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
           e.preventDefault();
           const dx = e.clientX - dragStart.current.x;
           const dy = e.clientY - dragStart.current.y;
-          setPan({
-              x: dragStart.current.panX + dx,
-              y: dragStart.current.panY + dy
-          });
+          setPan({ x: dragStart.current.panX + dx, y: dragStart.current.panY + dy });
       };
       
       const handleMouseUp = () => setIsPanning(false);
@@ -240,7 +211,6 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
             />
           </div>
           
-          {/* Zoom Indicator */}
           <div className="absolute bottom-2 right-2 bg-black/60 px-2 py-1 rounded text-[10px] text-slate-300 pointer-events-none">
               Ctrl+Scroll: {zoom.toFixed(1)}x
           </div>
@@ -323,27 +293,12 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
               </div>
            </div>
         </div>
-
+        
         <div className="mt-auto pt-4 border-t border-slate-700">
-           {hasUnsavedChanges ? (
-              <div className="mb-4 text-amber-400 text-sm flex items-center gap-2 bg-amber-900/20 p-2 rounded animate-pulse">
-                <AlertTriangle size={14} />
-                Changes pending save to disk
-              </div>
-           ) : (
-             <div className="mb-4 h-9"></div>
-           )}
-           
-           <button
-            onClick={onDownloadLabels}
-            className={`w-full flex items-center justify-center gap-2 font-bold py-3 rounded-lg shadow-lg transition-all active:scale-95
-               ${hasUnsavedChanges 
-                  ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-900/20' 
-                  : 'bg-slate-700 hover:bg-slate-600 text-slate-200'}`}
-          >
-            <Save size={18} />
-            {hasUnsavedChanges ? "Save Changes to File" : "Download File"}
-          </button>
+             <div className="text-slate-500 text-xs flex items-center justify-center gap-2">
+                 <Info size={14} />
+                 <span>Changes are auto-saved to disk</span>
+             </div>
         </div>
 
       </div>

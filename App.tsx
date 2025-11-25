@@ -2,9 +2,9 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { SetupScreen } from './components/SetupScreen';
 import { ImageViewer } from './components/ImageViewer';
 import { DetailPanel } from './components/DetailPanel';
-import { ImageAsset, YoloLabel } from './types';
+import { ImageAsset, YoloLabel, FileSystemFileHandle, FileSystemDirectoryHandle } from './types';
 import { parseYoloString, serializeYoloString } from './utils/yoloHelper';
-import { ArrowLeft, ArrowRight, Image as ImageIcon, Filter } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Image as ImageIcon, Filter, CheckCircle, Save } from 'lucide-react';
 
 const App: React.FC = () => {
   const [isSetup, setIsSetup] = useState(false);
@@ -12,27 +12,33 @@ const App: React.FC = () => {
   // Data State
   const [images, setImages] = useState<ImageAsset[]>([]);
   const [labelsRaw, setLabelsRaw] = useState<Map<string, string>>(new Map());
+  const [labelHandles, setLabelHandles] = useState<Map<string, FileSystemFileHandle>>(new Map());
+  const [labelsDirHandle, setLabelsDirHandle] = useState<FileSystemDirectoryHandle | null>(null);
   const [classes, setClasses] = useState<string[]>([]);
   
   // View State
   const [currentImageIdx, setCurrentImageIdx] = useState(0);
   const [currentLabelIdx, setCurrentLabelIdx] = useState(0);
-  const [panelWidth, setPanelWidth] = useState(400); // Default width
+  const [panelWidth, setPanelWidth] = useState(400); 
   const [isResizing, setIsResizing] = useState(false);
-  const [filterClassId, setFilterClassId] = useState<number>(-1); // -1 = All
+  const [filterClassId, setFilterClassId] = useState<number>(-1); 
   
-  // Working State (Parsed labels for current image)
+  // Working State
   const [currentLabels, setCurrentLabels] = useState<YoloLabel[]>([]);
-  const [unsavedMap, setUnsavedMap] = useState<Map<string, boolean>>(new Map()); // Track which files changed
+  const [lastSaveStatus, setLastSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
   // Load Setup Data
   const handleSetupComplete = (
     loadedImages: ImageAsset[], 
     loadedLabels: Map<string, string>, 
+    loadedLabelHandles: Map<string, FileSystemFileHandle>,
+    dirHandle: FileSystemDirectoryHandle | null,
     loadedClasses: string[]
   ) => {
     setImages(loadedImages);
     setLabelsRaw(loadedLabels);
+    setLabelHandles(loadedLabelHandles);
+    setLabelsDirHandle(dirHandle);
     setClasses(loadedClasses);
     setIsSetup(true);
     setCurrentImageIdx(0);
@@ -42,11 +48,7 @@ const App: React.FC = () => {
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizing) return;
-      
-      // Calculate new width (Total Width - Mouse X)
       const newWidth = window.innerWidth - e.clientX;
-      
-      // Constraints (min 300px, max 800px)
       if (newWidth >= 300 && newWidth <= 1200) {
         setPanelWidth(newWidth);
       }
@@ -82,20 +84,17 @@ const App: React.FC = () => {
        const key = img.name.replace(/\.[^/.]+$/, "");
        const rawContent = labelsRaw.get(key);
        if (!rawContent) return false;
-       
-       // We must parse to check the class ID accurately
        const labels = parseYoloString(rawContent);
        return labels.some(l => l.classId === filterClassId);
     });
   }, [images, labelsRaw, filterClassId]);
 
-  // Reset pagination when filter changes
   useEffect(() => {
     setCurrentImageIdx(0);
   }, [filterClassId]);
 
 
-  // --- Data Loading when Image Changes ---
+  // --- Data Loading ---
   useEffect(() => {
     if (!isSetup || filteredImages.length === 0) {
       setCurrentLabels([]);
@@ -103,7 +102,6 @@ const App: React.FC = () => {
       return;
     }
 
-    // Safety check for index out of bounds (can happen when list shrinks)
     const effectiveIdx = Math.min(currentImageIdx, filteredImages.length - 1);
     if (effectiveIdx !== currentImageIdx) {
         setCurrentImageIdx(effectiveIdx);
@@ -111,9 +109,8 @@ const App: React.FC = () => {
     }
 
     const img = filteredImages[effectiveIdx];
-    if (!img) return; // Extra safety
+    if (!img) return;
 
-    // Remove extension for key lookup
     const key = img.name.replace(/\.[^/.]+$/, "");
     
     const rawContent = labelsRaw.get(key) || "";
@@ -121,19 +118,15 @@ const App: React.FC = () => {
     
     setCurrentLabels(parsed);
     
-    // Smart Label Selection
     if (parsed.length > 0) {
        if (filterClassId !== -1) {
-          // If filtering, try to select the first label that matches the filter
           const matchIdx = parsed.findIndex(l => l.classId === filterClassId);
           if (matchIdx !== -1) {
             setCurrentLabelIdx(matchIdx);
           } else {
-             // Should rarely happen if filter logic is correct, unless labels changed
              setCurrentLabelIdx(0);
           }
        } else {
-           // Default behavior: keep index if valid
            if (currentLabelIdx >= parsed.length || currentLabelIdx < 0) {
              setCurrentLabelIdx(0);
            }
@@ -141,6 +134,8 @@ const App: React.FC = () => {
     } else {
       setCurrentLabelIdx(-1);
     }
+    
+    setLastSaveStatus('idle');
   }, [currentImageIdx, filteredImages, labelsRaw, isSetup, filterClassId]);
 
 
@@ -167,16 +162,13 @@ const App: React.FC = () => {
     setCurrentLabelIdx(prev => (prev - 1 + currentLabels.length) % currentLabels.length);
   }, [currentLabels.length]);
 
-  // --- Update Logic ---
+  // --- Core Update & Save Logic ---
   const handleLabelUpdate = (updatedLabel: YoloLabel) => {
     const newLabels = [...currentLabels];
-    
-    // We assume we are editing the label at currentLabelIdx or finding it
-    // In this simple app, currentLabelIdx is the source of truth for "selected"
     if (currentLabelIdx >= 0 && currentLabelIdx < newLabels.length) {
         newLabels[currentLabelIdx] = updatedLabel;
         setCurrentLabels(newLabels);
-        updateRawData(newLabels);
+        updateRawDataAndSave(newLabels);
     }
   };
 
@@ -185,49 +177,55 @@ const App: React.FC = () => {
           const newLabels = [...currentLabels];
           newLabels.splice(currentLabelIdx, 1);
           setCurrentLabels(newLabels);
-          setCurrentLabelIdx(-1); // Deselect
-          updateRawData(newLabels);
+          setCurrentLabelIdx(-1);
+          updateRawDataAndSave(newLabels);
       }
   };
 
-  const updateRawData = (newLabels: YoloLabel[]) => {
-      if (filteredImages[currentImageIdx]) {
-        const imgKey = filteredImages[currentImageIdx].name.replace(/\.[^/.]+$/, "");
-        const newRaw = serializeYoloString(newLabels);
+  const updateRawDataAndSave = async (newLabels: YoloLabel[]) => {
+      if (!filteredImages[currentImageIdx]) return;
+
+      const imgKey = filteredImages[currentImageIdx].name.replace(/\.[^/.]+$/, "");
+      const newRaw = serializeYoloString(newLabels);
+      
+      // 1. Update In-Memory State for fast UI response
+      const newLabelsMap = new Map(labelsRaw);
+      newLabelsMap.set(imgKey, newRaw);
+      setLabelsRaw(newLabelsMap);
+
+      // 2. Write to Disk
+      setLastSaveStatus('saving');
+      try {
+        let handle = labelHandles.get(imgKey);
         
-        const newLabelsMap = new Map(labelsRaw);
-        newLabelsMap.set(imgKey, newRaw);
-        setLabelsRaw(newLabelsMap);
+        // If handle doesn't exist, we need to create the file in the directory
+        if (!handle && labelsDirHandle) {
+             handle = await labelsDirHandle.getFileHandle(`${imgKey}.txt`, { create: true });
+             // Update handles map
+             const newHandles = new Map(labelHandles);
+             newHandles.set(imgKey, handle);
+             setLabelHandles(newHandles);
+        }
 
-        // Mark as unsaved
-        const newUnsaved = new Map(unsavedMap);
-        newUnsaved.set(imgKey, true);
-        setUnsavedMap(newUnsaved);
-    }
+        if (handle) {
+            const writable = await handle.createWritable();
+            await writable.write(newRaw);
+            await writable.close();
+            setLastSaveStatus('saved');
+            
+            // Revert status after 1s
+            setTimeout(() => setLastSaveStatus('idle'), 1500);
+        } else {
+            // No permissions or no directory selected
+            console.error("No file handle and no directory handle available.");
+            setLastSaveStatus('error');
+        }
+
+      } catch (err) {
+          console.error("Failed to save to disk:", err);
+          setLastSaveStatus('error');
+      }
   }
-
-  // --- Download Handler ---
-  const handleDownload = () => {
-    if (!filteredImages[currentImageIdx]) return;
-
-    const imgKey = filteredImages[currentImageIdx].name.replace(/\.[^/.]+$/, "");
-    const content = labelsRaw.get(imgKey) || "";
-    
-    const blob = new Blob([content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${imgKey}.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    
-    // Unmark unsaved
-    const newUnsaved = new Map(unsavedMap);
-    newUnsaved.delete(imgKey);
-    setUnsavedMap(newUnsaved);
-  };
 
   // --- Keyboard Shortcuts ---
   useEffect(() => {
@@ -263,33 +261,23 @@ const App: React.FC = () => {
                 handleLabelDelete();
                 break;
         }
-
-        if (e.key === 's' || e.key === 'S') {
-             if (e.ctrlKey || e.metaKey) {
-                e.preventDefault();
-                handleDownload();
-             }
-        }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSetup, nextImage, prevImage, nextLabel, prevLabel, handleDownload, handleLabelDelete]);
+  }, [isSetup, nextImage, prevImage, nextLabel, prevLabel, handleLabelDelete]);
 
 
   if (!isSetup) {
     return <SetupScreen onComplete={handleSetupComplete} />;
   }
 
-  // Derived references for Render
   const currentImage = filteredImages[currentImageIdx];
-  const currentKey = currentImage?.name.replace(/\.[^/.]+$/, "");
-  const hasUnsaved = currentKey ? unsavedMap.has(currentKey) : false;
 
   return (
     <div className="h-screen w-screen flex flex-col bg-slate-950 overflow-hidden">
       
-      {/* Top Header / Navigation Bar */}
+      {/* Top Header */}
       <header className="h-16 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-6 shrink-0 z-20">
         <div className="flex items-center gap-3">
             <div className="bg-indigo-600 p-1.5 rounded text-white">
@@ -325,7 +313,6 @@ const App: React.FC = () => {
                     onClick={prevImage}
                     disabled={filteredImages.length === 0 || currentImageIdx === 0}
                     className="p-2 hover:bg-slate-700 rounded text-slate-300 disabled:opacity-30 transition-colors"
-                    title="Previous Image (A)"
                 >
                     <ArrowLeft size={18} />
                 </button>
@@ -336,28 +323,32 @@ const App: React.FC = () => {
                     onClick={nextImage}
                     disabled={filteredImages.length === 0 || currentImageIdx === filteredImages.length - 1}
                     className="p-2 hover:bg-slate-700 rounded text-slate-300 disabled:opacity-30 transition-colors"
-                    title="Next Image (D)"
                 >
                     <ArrowRight size={18} />
                 </button>
             </div>
         </div>
 
-        <div className="w-40 flex justify-end">
-            <span className="text-xs text-slate-600">v1.3.1</span>
+        <div className="w-40 flex justify-end items-center gap-2">
+            {lastSaveStatus === 'saving' && (
+                <span className="text-xs text-indigo-400 flex items-center gap-1"><Save size={12} className="animate-spin" /> Saving...</span>
+            )}
+            {lastSaveStatus === 'saved' && (
+                <span className="text-xs text-emerald-400 flex items-center gap-1"><CheckCircle size={12} /> Saved</span>
+            )}
+            {lastSaveStatus === 'error' && (
+                <span className="text-xs text-red-400">Save Error</span>
+            )}
+            <span className="text-xs text-slate-600 ml-2">v1.4.0</span>
         </div>
       </header>
 
       {/* Main Content Area */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Guard against race condition where filteredImages has changed but index hasn't updated yet */}
         {(filteredImages.length === 0 || !currentImage) ? (
             <div className="flex-1 flex flex-col items-center justify-center text-slate-500">
                 <ImageIcon size={48} className="mb-4 opacity-50" />
                 <p className="text-lg font-semibold">No images found</p>
-                {filterClassId !== -1 && (
-                    <p className="text-sm">Try changing the filter to "All Defects" or selecting a different class.</p>
-                )}
             </div>
         ) : (
             <>
@@ -391,8 +382,6 @@ const App: React.FC = () => {
                     onPrevLabel={prevLabel}
                     onUpdateLabel={handleLabelUpdate}
                     onDeleteLabel={handleLabelDelete}
-                    onDownloadLabels={handleDownload}
-                    hasUnsavedChanges={hasUnsaved}
                 />
             </>
         )}
