@@ -25,38 +25,10 @@ export const serializeYoloString = (labels: YoloLabel[]): string => {
   }).join('\n');
 };
 
-export const getBoundingBoxStyle = (
-  label: YoloLabel, 
-  imgWidth: number, 
-  imgHeight: number,
-  isSelected: boolean,
-  colorIndex: number
-) => {
-  // Convert center x/y to top/left
-  const pixelW = label.w * imgWidth;
-  const pixelH = label.h * imgHeight;
-  const pixelX = (label.x * imgWidth) - (pixelW / 2);
-  const pixelY = (label.y * imgHeight) - (pixelH / 2);
-
-  return {
-    left: `${pixelX}px`,
-    top: `${pixelY}px`,
-    width: `${pixelW}px`,
-    height: `${pixelH}px`,
-    borderColor: isSelected ? '#facc15' : getColor(colorIndex), // Yellow if selected, else cycled color
-    boxShadow: isSelected ? '0 0 0 2px rgba(250, 204, 21, 0.5), 0 0 10px rgba(0,0,0,0.5)' : 'none',
-    zIndex: isSelected ? 20 : 10
-  };
+export const getColor = (index: number) => {
+  // Use a golden angle approximation to distribute colors evenly around the hue wheel
+  // ensuring high contrast between consecutive indices.
+  const hue = (index * 137.508) % 360;
+  // Saturation 95%, Lightness 60% for good visibility on dark UI
+  return `hsl(${hue}, 95%, 60%)`;
 };
-
-const COLORS = [
-  '#ef4444', // red
-  '#3b82f6', // blue
-  '#22c55e', // green
-  '#a855f7', // purple
-  '#f97316', // orange
-  '#ec4899', // pink
-  '#06b6d4', // cyan
-];
-
-export const getColor = (index: number) => COLORS[index % COLORS.length];

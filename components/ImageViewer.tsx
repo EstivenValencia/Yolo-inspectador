@@ -12,7 +12,6 @@ interface ImageViewerProps {
   onUpdateLabel: (label: YoloLabel) => void;
 }
 
-// Added 'move' to the type
 type ResizeHandle = 'tl' | 'tr' | 'bl' | 'br' | 'move' | null;
 
 export const ImageViewer: React.FC<ImageViewerProps> = ({
@@ -57,26 +56,32 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
 
     const onWheel = (e: WheelEvent) => {
       // Check for Ctrl key (standard for zoom)
-      if (e.ctrlKey) {
+      if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
-        e.stopPropagation(); // CRITICAL for Firefox to prevent browser zoom
+        e.stopPropagation(); 
         
-        // Exponential zoom factor
-        const s = Math.exp(-e.deltaY * 0.002);
+        // Normalize deltaY across browsers
+        // Firefox uses Lines (1), others use Pixels (0)
+        let delta = e.deltaY;
+        if (e.deltaMode === 1) { // DOM_DELTA_LINE
+            delta *= 33;
+        } else if (e.deltaMode === 2) { // DOM_DELTA_PAGE
+            delta *= 800; 
+        }
+
+        // Exponential zoom factor - adjusted sensitivity
+        const s = Math.exp(-delta * 0.0015);
         
         setTransform(prev => {
            // Constraints
-           const newScale = Math.min(Math.max(0.1, prev.scale * s), 20);
+           const newScale = Math.min(Math.max(0.1, prev.scale * s), 50); // Increased max zoom
            const ratio = newScale / prev.scale;
 
            // Zoom to mouse cursor logic
            const rect = viewport.getBoundingClientRect();
-           // Mouse position relative to the center of the viewport
            const mouseX = e.clientX - rect.left - rect.width / 2;
            const mouseY = e.clientY - rect.top - rect.height / 2;
 
-           // Calculate new translation to keep mouse point stable
-           // new_tx = mx - (mx - old_tx) * ratio
            const newX = mouseX - (mouseX - prev.x) * ratio;
            const newY = mouseY - (mouseY - prev.y) * ratio;
 
@@ -93,7 +98,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
     // Start Panning if left click (button 0) or middle click (button 1)
     // Only if not resizing
     if (!resizing && (e.button === 0 || e.button === 1)) {
-        e.preventDefault(); // CRITICAL: Prevent default browser drag to ensure custom pan works
+        e.preventDefault(); 
         setIsPanning(true);
         startDrag.current.mouseX = e.clientX;
         startDrag.current.mouseY = e.clientY;
@@ -117,7 +122,6 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
-      // 1. Resizing/Moving Logic
       if (resizing && contentRef.current) {
         e.preventDefault();
         const { width: contentW, height: contentH } = contentRef.current.getBoundingClientRect();
@@ -138,7 +142,6 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
         }
 
         // CASE: RESIZING (Drag corners)
-        // Calculate current box edges (normalized 0-1)
         const currentLeft = start.x - start.w / 2;
         const currentRight = start.x + start.w / 2;
         const currentTop = start.y - start.h / 2;
@@ -154,12 +157,12 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
         if (resizing.includes('t')) newTop += deltaY;
         if (resizing.includes('b')) newBottom += deltaY;
 
-        // Constraints to prevent flipping
-        if (newRight - newLeft < 0.005) {
-            if (resizing.includes('l')) newLeft = newRight - 0.005; else newRight = newLeft + 0.005;
+        // Constraints
+        if (newRight - newLeft < 0.001) {
+             if (resizing.includes('l')) newLeft = newRight - 0.001; else newRight = newLeft + 0.001;
         }
-        if (newBottom - newTop < 0.005) {
-            if (resizing.includes('t')) newTop = newBottom - 0.005; else newBottom = newTop + 0.005;
+        if (newBottom - newTop < 0.001) {
+             if (resizing.includes('t')) newTop = newBottom - 0.001; else newBottom = newTop + 0.001;
         }
 
         const newW = newRight - newLeft;
@@ -171,7 +174,6 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
         return;
       }
 
-      // 2. Panning Logic
       if (isPanning) {
           e.preventDefault();
           const dx = e.clientX - startDrag.current.mouseX;
@@ -206,7 +208,6 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
       onMouseDown={handleMouseDown}
       className={`flex-1 bg-slate-950 flex items-center justify-center overflow-hidden relative ${isPanning ? 'cursor-grabbing' : 'cursor-grab'}`}
     >
-        {/* Reset View Button */}
         <div className="absolute top-4 right-4 z-50 flex flex-col gap-2">
             {(transform.scale !== 1 || transform.x !== 0 || transform.y !== 0) && (
                 <button 
@@ -222,7 +223,6 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
             Ctrl + Scroll to Zoom • Drag Empty Space to Pan • Drag Box Borders to Move
         </div>
 
-      {/* Transformable Content Wrapper */}
       <div 
         ref={contentRef}
         className="relative shadow-2xl transition-transform duration-75 ease-out origin-center pointer-events-none"
@@ -237,7 +237,6 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
           draggable={false}
         />
         
-        {/* Overlay Layer */}
         <div className="absolute inset-0 pointer-events-none">
           {labels.map((label, idx) => {
             const isSelected = idx === currentLabelIndex;
@@ -248,9 +247,10 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
             const height = label.h * 100;
             
             const color = getColor(label.classId);
-            const borderColor = isSelected ? '#facc15' : color;
+            const borderColor = color; // Always use class color
             const borderWidth = isSelected ? '3px' : '2px';
-            const opacityClass = isSelected ? 'opacity-100 z-50' : 'opacity-70 hover:opacity-100 z-10 hover:z-40';
+            const opacityClass = isSelected ? 'opacity-100 z-50' : 'opacity-80 hover:opacity-100 z-10 hover:z-40';
+            const shadow = isSelected ? `0 0 0 2px white, 0 0 10px ${color}` : 'none'; // Distinct white outline for selection
 
             return (
               <div
@@ -261,66 +261,49 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                   top: `${top}%`,
                   width: `${width}%`,
                   height: `${height}%`,
-                  backgroundColor: isSelected ? 'rgba(250, 204, 21, 0.1)' : 'transparent',
                 }}
               >
-                {/* 
-                  Constructing the Borders as separate interactive divs.
-                  This allows clicks in the empty center to pass through to the image (for panning),
-                  while clicks on the border trigger selection/moving.
-                */}
-                
-                {/* Top Border */}
+                {/* Borders for interaction */}
                 <div 
                   onMouseDown={(e) => startResize(e, 'move', label, idx)}
                   className="absolute top-0 left-0 w-full cursor-move pointer-events-auto"
-                  style={{ height: borderWidth, backgroundColor: borderColor, transform: 'translateY(-50%)' }}
+                  style={{ height: borderWidth, backgroundColor: borderColor, boxShadow: shadow, transform: 'translateY(-50%)' }}
                 />
-                
-                {/* Bottom Border */}
                 <div 
                   onMouseDown={(e) => startResize(e, 'move', label, idx)}
                   className="absolute bottom-0 left-0 w-full cursor-move pointer-events-auto"
-                  style={{ height: borderWidth, backgroundColor: borderColor, transform: 'translateY(50%)' }}
+                  style={{ height: borderWidth, backgroundColor: borderColor, boxShadow: shadow, transform: 'translateY(50%)' }}
                 />
-                
-                {/* Left Border */}
                 <div 
                   onMouseDown={(e) => startResize(e, 'move', label, idx)}
                   className="absolute top-0 left-0 h-full cursor-move pointer-events-auto"
-                  style={{ width: borderWidth, backgroundColor: borderColor, transform: 'translateX(-50%)' }}
+                  style={{ width: borderWidth, backgroundColor: borderColor, boxShadow: shadow, transform: 'translateX(-50%)' }}
                 />
-                
-                {/* Right Border */}
                 <div 
                   onMouseDown={(e) => startResize(e, 'move', label, idx)}
                   className="absolute top-0 right-0 h-full cursor-move pointer-events-auto"
-                  style={{ width: borderWidth, backgroundColor: borderColor, transform: 'translateX(50%)' }}
+                  style={{ width: borderWidth, backgroundColor: borderColor, boxShadow: shadow, transform: 'translateX(50%)' }}
                 />
 
-
-                {/* Label Tag */}
                 {(isSelected || width > 0) && (
                    <div 
                     className="absolute bottom-full left-0 mb-1 px-1.5 py-0.5 text-xs font-bold text-white whitespace-nowrap bg-black/75 rounded shadow-sm pointer-events-none transform origin-bottom-left"
-                    style={{ 
-                        borderLeft: `3px solid ${color}`,
-                    }}
+                    style={{ borderLeft: `4px solid ${color}` }}
                    >
                      {classes[label.classId] || label.classId}
                    </div>
                 )}
 
-                {/* Resize Handles - Only visible when selected */}
+                {/* Resize Handles */}
                 {isSelected && (
                   <>
-                    <div className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-yellow-400 border border-black cursor-nwse-resize z-50 rounded-sm pointer-events-auto"
+                    <div className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-white border border-black cursor-nwse-resize z-50 rounded-sm pointer-events-auto"
                          onMouseDown={(e) => startResize(e, 'tl', label, idx)} />
-                    <div className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-yellow-400 border border-black cursor-nesw-resize z-50 rounded-sm pointer-events-auto"
+                    <div className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-white border border-black cursor-nesw-resize z-50 rounded-sm pointer-events-auto"
                          onMouseDown={(e) => startResize(e, 'tr', label, idx)} />
-                    <div className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-yellow-400 border border-black cursor-nesw-resize z-50 rounded-sm pointer-events-auto"
+                    <div className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-white border border-black cursor-nesw-resize z-50 rounded-sm pointer-events-auto"
                          onMouseDown={(e) => startResize(e, 'bl', label, idx)} />
-                    <div className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-yellow-400 border border-black cursor-nwse-resize z-50 rounded-sm pointer-events-auto"
+                    <div className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-white border border-black cursor-nwse-resize z-50 rounded-sm pointer-events-auto"
                          onMouseDown={(e) => startResize(e, 'br', label, idx)} />
                   </>
                 )}

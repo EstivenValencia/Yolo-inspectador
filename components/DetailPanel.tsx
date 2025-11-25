@@ -65,53 +65,61 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     const ctx = canvasRef.current.getContext('2d');
     if (!ctx) return;
 
-    // Calculate crop coordinates
+    // Calculate crop coordinates based on Interpolation (0% = Label, 100% = Full Image)
     const imgW = imgElement.naturalWidth;
     const imgH = imgElement.naturalHeight;
     
-    // Calculate Padding based on Slider (0% to 100%)
-    // 0% = 1.0 multiplier (no extra padding)
-    // 100% = 3.0 multiplier (lots of context)
-    const paddingMultiplier = 1 + (contextPadding / 50); 
-    
-    let w = currentLabel.w * imgW * paddingMultiplier;
-    let h = currentLabel.h * imgH * paddingMultiplier;
-    
-    // Clamp width/height
-    if (w > imgW) w = imgW;
-    if (h > imgH) h = imgH;
+    // Convert Label Center/Width to Top/Left/Right/Bottom (0-1 coords)
+    const lblLeft = currentLabel.x - currentLabel.w / 2;
+    const lblRight = currentLabel.x + currentLabel.w / 2;
+    const lblTop = currentLabel.y - currentLabel.h / 2;
+    const lblBottom = currentLabel.y + currentLabel.h / 2;
 
-    let cx = currentLabel.x * imgW;
-    let cy = currentLabel.y * imgH;
+    // Target Full Image (0-1 coords)
+    const imgLeft = 0;
+    const imgRight = 1;
+    const imgTop = 0;
+    const imgBottom = 1;
 
-    let x = cx - w / 2;
-    let y = cy - h / 2;
+    // Interpolation factor t (0 to 1)
+    const t = contextPadding / 100;
 
-    // Boundary checks
-    if (x < 0) x = 0;
-    if (y < 0) y = 0;
-    if (x + w > imgW) x = imgW - w;
-    if (y + h > imgH) y = imgH - h;
+    // Interpolate edges
+    // Edge(t) = LabelEdge + (TargetEdge - LabelEdge) * t
+    const cLeft = lblLeft + (imgLeft - lblLeft) * t;
+    const cRight = lblRight + (imgRight - lblRight) * t;
+    const cTop = lblTop + (imgTop - lblTop) * t;
+    const cBottom = lblBottom + (imgBottom - lblBottom) * t;
+
+    // Convert back to pixels
+    const pxLeft = Math.max(0, cLeft * imgW);
+    const pxTop = Math.max(0, cTop * imgH);
+    const pxWidth = Math.min(imgW, (cRight * imgW) - pxLeft);
+    const pxHeight = Math.min(imgH, (cBottom * imgH) - pxTop);
 
     // Set canvas size
-    canvasRef.current.width = w;
-    canvasRef.current.height = h;
+    canvasRef.current.width = Math.max(1, pxWidth);
+    canvasRef.current.height = Math.max(1, pxHeight);
 
-    ctx.clearRect(0, 0, w, h);
-    ctx.drawImage(imgElement, x, y, w, h, 0, 0, w, h);
+    ctx.clearRect(0, 0, pxWidth, pxHeight);
+    
+    // drawImage(img, sx, sy, sWidth, sHeight, dx, dy, dWidth, dHeight)
+    ctx.drawImage(imgElement, pxLeft, pxTop, pxWidth, pxHeight, 0, 0, pxWidth, pxHeight);
 
-    // Draw a rectangle on the crop to show exactly where the box is relative to the crop
-    // Calculate box relative to crop x, y
-    const boxX = (currentLabel.x * imgW) - (currentLabel.w * imgW) / 2 - x;
-    const boxY = (currentLabel.y * imgH) - (currentLabel.h * imgH) / 2 - y;
+    // Draw a rectangle on the crop to show the defect
+    // Defect coordinates relative to the cropped canvas
+    const boxX = (currentLabel.x * imgW) - (currentLabel.w * imgW) / 2 - pxLeft;
+    const boxY = (currentLabel.y * imgH) - (currentLabel.h * imgH) / 2 - pxTop;
     const boxW = currentLabel.w * imgW;
     const boxH = currentLabel.h * imgH;
 
-    ctx.strokeStyle = '#facc15';
-    ctx.lineWidth = Math.max(2, w / 100); 
+    // Use specific class color
+    ctx.strokeStyle = getColor(currentLabel.classId);
+    // Line width proportional to the view width so it's visible
+    ctx.lineWidth = Math.max(2, pxWidth / 150); 
     ctx.strokeRect(boxX, boxY, boxW, boxH);
 
-  }, [currentLabel, imgElement, contextPadding]); // Re-draw when slider changes
+  }, [currentLabel, imgElement, contextPadding]); 
 
   // --- Zoom Logic for Right Panel ---
   useEffect(() => {
@@ -119,11 +127,19 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     if (!container) return;
 
     const onWheel = (e: WheelEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-        
-        const s = Math.exp(-e.deltaY * 0.002);
-        setZoom(prev => Math.min(Math.max(1, prev * s), 10)); // Max 10x zoom, min 1x
+        // Only Zoom if Ctrl is pressed (consistent with main viewer)
+        if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            // Normalize delta (Firefox/Edge support)
+            let delta = e.deltaY;
+            if (e.deltaMode === 1) delta *= 33;
+            if (e.deltaMode === 2) delta *= 800;
+
+            const s = Math.exp(-delta * 0.0015);
+            setZoom(prev => Math.min(Math.max(1, prev * s), 20)); // Max 20x, Min 1x
+        }
     };
 
     container.addEventListener('wheel', onWheel, { passive: false });
@@ -132,6 +148,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
 
   // --- Pan Logic for Right Panel ---
   const handleMouseDown = (e: React.MouseEvent) => {
+      // Allow panning with left or middle mouse
       e.preventDefault();
       setIsPanning(true);
       dragStart.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
@@ -223,7 +240,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
           
           {/* Zoom Indicator */}
           <div className="absolute bottom-2 right-2 bg-black/60 px-2 py-1 rounded text-[10px] text-slate-300 pointer-events-none">
-              {zoom.toFixed(1)}x
+              Ctrl+Scroll: {zoom.toFixed(1)}x
           </div>
         </div>
         
