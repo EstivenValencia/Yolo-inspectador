@@ -8,8 +8,10 @@ interface ImageViewerProps {
   labels: YoloLabel[];
   currentLabelIndex: number;
   classes: string[];
+  isCreating?: boolean;
   onSelectLabel: (index: number) => void;
   onUpdateLabel: (label: YoloLabel) => void;
+  onCreateLabel?: (label: YoloLabel) => void;
 }
 
 type ResizeHandle = 'tl' | 'tr' | 'bl' | 'br' | 'move' | null;
@@ -19,13 +21,19 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
   labels,
   currentLabelIndex,
   classes,
+  isCreating = false,
   onSelectLabel,
   onUpdateLabel,
+  onCreateLabel,
 }) => {
   const [transform, setTransform] = useState({ scale: 1, x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [resizing, setResizing] = useState<ResizeHandle>(null);
   
+  // Creation State
+  const [creationStart, setCreationStart] = useState<{x: number, y: number} | null>(null);
+  const [ghostBox, setGhostBox] = useState<{x: number, y: number, w: number, h: number} | null>(null);
+
   const viewportRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   
@@ -47,6 +55,8 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
   // Reset zoom on image change
   useEffect(() => {
     setTransform({ scale: 1, x: 0, y: 0 });
+    setCreationStart(null);
+    setGhostBox(null);
   }, [image.url]);
 
   // Handle Wheel Zoom (Non-passive listener required to prevent browser zoom with Ctrl)
@@ -95,8 +105,23 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
   }, []);
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    // Start Panning if left click (button 0) or middle click (button 1)
-    // Only if not resizing
+    // 1. CREATION LOGIC
+    if (isCreating && contentRef.current) {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        const rect = contentRef.current.getBoundingClientRect();
+        // Normalized coordinates (0-1) relative to the image content
+        const x = (e.clientX - rect.left) / rect.width;
+        const y = (e.clientY - rect.top) / rect.height;
+        
+        setCreationStart({ x, y });
+        setGhostBox({ x, y, w: 0, h: 0 });
+        return;
+    }
+
+    // 2. PANNING LOGIC
+    // Only start pan if not resizing and not creating
     if (!resizing && (e.button === 0 || e.button === 1)) {
         e.preventDefault(); 
         setIsPanning(true);
@@ -111,6 +136,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
   };
 
   const startResize = (e: React.MouseEvent, handle: ResizeHandle, label: YoloLabel, idx: number) => {
+    if (isCreating) return; // Disable selection/resize while creating
     e.stopPropagation(); // Prevent panning
     e.preventDefault();
     onSelectLabel(idx); // Ensure selection when clicking border/corner
@@ -125,6 +151,24 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
+      // 1. CREATION DRAG
+      if (isCreating && creationStart && contentRef.current) {
+          e.preventDefault();
+          const rect = contentRef.current.getBoundingClientRect();
+          const currentX = (e.clientX - rect.left) / rect.width;
+          const currentY = (e.clientY - rect.top) / rect.height;
+
+          // Calculate Top-Left and W/H based on start point and current point
+          const minX = Math.min(creationStart.x, currentX);
+          const minY = Math.min(creationStart.y, currentY);
+          const w = Math.abs(currentX - creationStart.x);
+          const h = Math.abs(currentY - creationStart.y);
+
+          setGhostBox({ x: minX, y: minY, w, h });
+          return;
+      }
+
+      // 2. RESIZING
       if (resizing && contentRef.current) {
         e.preventDefault();
         const { width: contentW, height: contentH } = contentRef.current.getBoundingClientRect();
@@ -177,6 +221,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
         return;
       }
 
+      // 3. PANNING
       if (isPanning) {
           e.preventDefault();
           const dx = e.clientX - startDrag.current.mouseX;
@@ -190,11 +235,31 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
     };
 
     const handleMouseUp = () => {
+      // 1. FINISH CREATION
+      if (isCreating && creationStart && ghostBox && onCreateLabel) {
+          // Convert Top-Left/W/H to YOLO CenterX/CenterY/W/H
+          const centerX = ghostBox.x + ghostBox.w / 2;
+          const centerY = ghostBox.y + ghostBox.h / 2;
+          
+          // Only create if it has some size
+          if (ghostBox.w > 0.001 && ghostBox.h > 0.001) {
+              onCreateLabel({
+                  classId: 0, // App will set the default class
+                  x: centerX,
+                  y: centerY,
+                  w: ghostBox.w,
+                  h: ghostBox.h
+              });
+          }
+          setCreationStart(null);
+          setGhostBox(null);
+      }
+
       setResizing(null);
       setIsPanning(false);
     };
 
-    if (resizing || isPanning) {
+    if (resizing || isPanning || isCreating) {
       window.addEventListener('mousemove', handleMouseMove);
       window.addEventListener('mouseup', handleMouseUp);
     }
@@ -203,13 +268,13 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [resizing, isPanning, transform, onUpdateLabel]);
+  }, [resizing, isPanning, transform, onUpdateLabel, isCreating, creationStart, ghostBox, onCreateLabel]);
 
   return (
     <div 
       ref={viewportRef}
       onMouseDown={handleMouseDown}
-      className={`flex-1 bg-slate-950 flex items-center justify-center overflow-hidden relative ${isPanning ? 'cursor-grabbing' : 'cursor-grab'}`}
+      className={`flex-1 bg-slate-950 flex items-center justify-center overflow-hidden relative ${isCreating ? 'cursor-crosshair' : (isPanning ? 'cursor-grabbing' : 'cursor-grab')}`}
     >
         <div className="absolute top-4 right-4 z-50 flex flex-col gap-2">
             {(transform.scale !== 1 || transform.x !== 0 || transform.y !== 0) && (
@@ -222,8 +287,14 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
             )}
         </div>
         
+        {isCreating && (
+             <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-indigo-600 text-white px-4 py-2 rounded-lg shadow-lg font-bold border border-white/20 animate-pulse pointer-events-none">
+                CREATE MODE (Draw a box)
+             </div>
+        )}
+        
         <div className="absolute bottom-4 left-4 z-50 text-slate-500 text-xs pointer-events-none select-none bg-black/20 p-1 rounded backdrop-blur-sm">
-            Ctrl + Scroll to Zoom • Drag Empty Space to Pan • Drag Box Borders to Move
+            Ctrl + Scroll to Zoom • {isCreating ? 'Click & Drag to Create' : 'Drag to Pan'}
         </div>
 
       <div 
@@ -269,22 +340,22 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                 {/* Borders for interaction */}
                 <div 
                   onMouseDown={(e) => startResize(e, 'move', label, idx)}
-                  className="absolute top-0 left-0 w-full cursor-move pointer-events-auto"
+                  className={`absolute top-0 left-0 w-full ${!isCreating && 'cursor-move pointer-events-auto'}`}
                   style={{ height: borderWidth, backgroundColor: borderColor, boxShadow: shadow, transform: 'translateY(-50%)' }}
                 />
                 <div 
                   onMouseDown={(e) => startResize(e, 'move', label, idx)}
-                  className="absolute bottom-0 left-0 w-full cursor-move pointer-events-auto"
+                  className={`absolute bottom-0 left-0 w-full ${!isCreating && 'cursor-move pointer-events-auto'}`}
                   style={{ height: borderWidth, backgroundColor: borderColor, boxShadow: shadow, transform: 'translateY(50%)' }}
                 />
                 <div 
                   onMouseDown={(e) => startResize(e, 'move', label, idx)}
-                  className="absolute top-0 left-0 h-full cursor-move pointer-events-auto"
+                  className={`absolute top-0 left-0 h-full ${!isCreating && 'cursor-move pointer-events-auto'}`}
                   style={{ width: borderWidth, backgroundColor: borderColor, boxShadow: shadow, transform: 'translateX(-50%)' }}
                 />
                 <div 
                   onMouseDown={(e) => startResize(e, 'move', label, idx)}
-                  className="absolute top-0 right-0 h-full cursor-move pointer-events-auto"
+                  className={`absolute top-0 right-0 h-full ${!isCreating && 'cursor-move pointer-events-auto'}`}
                   style={{ width: borderWidth, backgroundColor: borderColor, boxShadow: shadow, transform: 'translateX(50%)' }}
                 />
 
@@ -298,7 +369,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                 )}
 
                 {/* Resize Handles */}
-                {isSelected && (
+                {isSelected && !isCreating && (
                   <>
                     <div className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-white border border-black cursor-nwse-resize z-50 rounded-sm pointer-events-auto"
                          onMouseDown={(e) => startResize(e, 'tl', label, idx)} />
@@ -313,6 +384,22 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
               </div>
             );
           })}
+
+          {/* GHOST BOX RENDER */}
+          {ghostBox && (
+              <div 
+                className="absolute border-2 border-indigo-400 bg-indigo-500/20 pointer-events-none z-[100]"
+                style={{
+                    left: `${ghostBox.x * 100}%`,
+                    top: `${ghostBox.y * 100}%`,
+                    width: `${ghostBox.w * 100}%`,
+                    height: `${ghostBox.h * 100}%`,
+                }}
+              >
+                  <div className="absolute top-0 right-0 bg-indigo-600 text-white text-[10px] px-1">New</div>
+              </div>
+          )}
+
         </div>
       </div>
     </div>

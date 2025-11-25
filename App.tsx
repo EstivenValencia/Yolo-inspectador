@@ -4,7 +4,7 @@ import { ImageViewer } from './components/ImageViewer';
 import { DetailPanel } from './components/DetailPanel';
 import { ImageAsset, YoloLabel, FileSystemFileHandle, FileSystemDirectoryHandle } from './types';
 import { parseYoloString, serializeYoloString } from './utils/yoloHelper';
-import { ArrowLeft, ArrowRight, Image as ImageIcon, Filter, CheckCircle, Save } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Image as ImageIcon, Filter, CheckCircle, Save, PlusSquare } from 'lucide-react';
 
 const App: React.FC = () => {
   const [isSetup, setIsSetup] = useState(false);
@@ -22,6 +22,7 @@ const App: React.FC = () => {
   const [panelWidth, setPanelWidth] = useState(400); 
   const [isResizing, setIsResizing] = useState(false);
   const [filterClassId, setFilterClassId] = useState<number>(-1); 
+  const [isCreating, setIsCreating] = useState(false); // New: Creation Mode
   
   // Working State
   const [currentLabels, setCurrentLabels] = useState<YoloLabel[]>([]);
@@ -118,6 +119,9 @@ const App: React.FC = () => {
     
     setCurrentLabels(parsed);
     
+    // Reset creation mode when image changes
+    setIsCreating(false);
+
     if (parsed.length > 0) {
        if (filterClassId !== -1) {
           const matchIdx = parsed.findIndex(l => l.classId === filterClassId);
@@ -162,7 +166,7 @@ const App: React.FC = () => {
     setCurrentLabelIdx(prev => (prev - 1 + currentLabels.length) % currentLabels.length);
   }, [currentLabels.length]);
 
-  // --- Core Update & Save Logic ---
+  // --- Core Update, Create & Save Logic ---
   const handleLabelUpdate = (updatedLabel: YoloLabel) => {
     const newLabels = [...currentLabels];
     if (currentLabelIdx >= 0 && currentLabelIdx < newLabels.length) {
@@ -172,9 +176,25 @@ const App: React.FC = () => {
     }
   };
 
+  const handleLabelCreate = (newLabel: YoloLabel) => {
+      // Use the currently selected class ID if available, otherwise 0
+      const defaultClass = currentLabels.length > 0 && currentLabelIdx !== -1 
+          ? currentLabels[currentLabelIdx].classId 
+          : 0;
+
+      const labelToAdd = { ...newLabel, classId: defaultClass };
+      const newLabels = [...currentLabels, labelToAdd];
+      
+      setCurrentLabels(newLabels);
+      setCurrentLabelIdx(newLabels.length - 1); // Select the new label
+      setIsCreating(false); // Turn off create mode after creation
+      updateRawDataAndSave(newLabels);
+  };
+
   const handleLabelDelete = () => {
       if (currentLabelIdx >= 0 && currentLabelIdx < currentLabels.length) {
           const newLabels = [...currentLabels];
+          // Splice removes ONLY the element at this index
           newLabels.splice(currentLabelIdx, 1);
           setCurrentLabels(newLabels);
           setCurrentLabelIdx(-1);
@@ -213,7 +233,7 @@ const App: React.FC = () => {
             await writable.close();
             setLastSaveStatus('saved');
             
-            // Revert status after 1s
+            // Revert status after 1.5s
             setTimeout(() => setLastSaveStatus('idle'), 1500);
         } else {
             // No permissions or no directory selected
@@ -260,6 +280,10 @@ const App: React.FC = () => {
                 e.preventDefault();
                 handleLabelDelete();
                 break;
+            case 'm': // Mode: Create
+                e.preventDefault();
+                setIsCreating(prev => !prev);
+                break;
         }
     };
 
@@ -292,6 +316,16 @@ const App: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-4">
+             {/* Mode Indicator Button */}
+             <button 
+                onClick={() => setIsCreating(!isCreating)}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-bold transition-all border ${isCreating ? 'bg-indigo-600 border-indigo-500 text-white animate-pulse' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'}`}
+                title="Toggle Create Mode (M)"
+             >
+                <PlusSquare size={14} />
+                {isCreating ? 'CREATING MODE (Click & Drag)' : 'Create New Box (M)'}
+             </button>
+
              {/* Filter Dropdown */}
              <div className="flex items-center gap-2 mr-2 border-r border-slate-700 pr-4">
                 <Filter size={16} className="text-slate-400" />
@@ -339,7 +373,7 @@ const App: React.FC = () => {
             {lastSaveStatus === 'error' && (
                 <span className="text-xs text-red-400">Save Error</span>
             )}
-            <span className="text-xs text-slate-600 ml-2">v1.4.0</span>
+            <span className="text-xs text-slate-600 ml-2">v1.5.0</span>
         </div>
       </header>
 
@@ -358,8 +392,10 @@ const App: React.FC = () => {
                     labels={currentLabels}
                     currentLabelIndex={currentLabelIdx}
                     classes={classes}
+                    isCreating={isCreating}
                     onSelectLabel={setCurrentLabelIdx}
                     onUpdateLabel={handleLabelUpdate}
+                    onCreateLabel={handleLabelCreate}
                 />
 
                 {/* Resizer Handle */}
