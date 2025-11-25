@@ -312,6 +312,14 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
         />
         
         <div className="absolute inset-0 pointer-events-none">
+            {/* Guide Lines for Crosshair in Create Mode */}
+            {isCreating && !creationStart && (
+                <div className="absolute inset-0 pointer-events-none">
+                    {/* Implemented via CSS cursor usually, but we could add SVG guides here if requested. 
+                        For now, standard crosshair cursor handles this well enough. */}
+                </div>
+            )}
+
           {labels.map((label, idx) => {
             const isSelected = idx === currentLabelIndex;
             
@@ -385,10 +393,10 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
             );
           })}
 
-          {/* GHOST BOX RENDER */}
+          {/* GHOST BOX RENDER (Create Mode) */}
           {ghostBox && (
               <div 
-                className="absolute border-2 border-indigo-400 bg-indigo-500/20 pointer-events-none z-[100]"
+                className="absolute border-2 border-emerald-400 bg-emerald-500/20 pointer-events-none z-[100]"
                 style={{
                     left: `${ghostBox.x * 100}%`,
                     top: `${ghostBox.y * 100}%`,
@@ -396,7 +404,10 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                     height: `${ghostBox.h * 100}%`,
                 }}
               >
-                  <div className="absolute top-0 right-0 bg-indigo-600 text-white text-[10px] px-1">New</div>
+                  {/* Crosshair effect inside the box */}
+                  <div className="absolute top-1/2 left-0 w-full h-px bg-emerald-400/50"></div>
+                  <div className="absolute top-0 left-1/2 h-full w-px bg-emerald-400/50"></div>
+                  <div className="absolute top-0 right-0 bg-emerald-600 text-white text-[10px] px-1 font-bold shadow">New</div>
               </div>
           )}
 

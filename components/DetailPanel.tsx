@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { YoloLabel, ImageAsset } from '../types';
-import { ChevronLeft, ChevronRight, AlertTriangle, Tag, MousePointerClick, Maximize2, Trash2, Info } from 'lucide-react';
+import { ChevronLeft, ChevronRight, AlertTriangle, Tag, MousePointerClick, Maximize2, Trash2, Info, Plus } from 'lucide-react';
 import { getColor } from '../utils/yoloHelper';
 
 interface DetailPanelProps {
@@ -14,6 +14,8 @@ interface DetailPanelProps {
   onPrevLabel: () => void;
   onUpdateLabel: (updatedLabel: YoloLabel) => void;
   onDeleteLabel: () => void;
+  isCreating: boolean;
+  onToggleCreateMode: () => void;
 }
 
 export const DetailPanel: React.FC<DetailPanelProps> = ({
@@ -27,6 +29,8 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   onPrevLabel,
   onUpdateLabel,
   onDeleteLabel,
+  isCreating,
+  onToggleCreateMode,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const zoomContainerRef = useRef<HTMLDivElement>(null);
@@ -161,7 +165,15 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
       <div style={{ width }} className="h-full flex flex-col items-center justify-center p-8 bg-slate-800 border-l border-slate-700 text-slate-400 shrink-0">
         <AlertTriangle className="mb-4 text-amber-500" size={48} />
         <h3 className="text-xl font-bold mb-2">No Labels Found</h3>
-        <p className="text-center text-sm">This image has no annotated defects.</p>
+        <p className="text-center text-sm mb-6">This image has no annotated defects.</p>
+        
+        <button 
+           onClick={onToggleCreateMode}
+           className={`flex items-center gap-2 px-6 py-3 rounded-lg font-bold transition-all shadow-lg ${isCreating ? 'bg-indigo-600 text-white shadow-indigo-500/30' : 'bg-slate-700 hover:bg-slate-600 text-slate-200'}`}
+        >
+             <Plus size={20} />
+             {isCreating ? 'Draw on Image' : 'Start Adding Labels'}
+        </button>
       </div>
     );
   }
@@ -176,9 +188,18 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
             <MousePointerClick size={16} /> 
             Zoom View
            </h2>
-           <span className="text-xs bg-slate-700 text-slate-300 px-2 py-1 rounded">
-             {currentLabelIndex + 1} / {totalLabels}
-           </span>
+           <div className="flex items-center gap-2">
+               <button 
+                  onClick={onToggleCreateMode}
+                  className={`p-1 rounded transition-colors ${isCreating ? 'bg-indigo-600 text-white' : 'hover:bg-slate-700 text-slate-400'}`}
+                  title="Add New Label"
+               >
+                   <Plus size={16} />
+               </button>
+               <span className="text-xs bg-slate-700 text-slate-300 px-2 py-1 rounded">
+                 {currentLabelIndex + 1} / {totalLabels}
+               </span>
+           </div>
         </div>
 
         {/* Context Slider */}
@@ -228,7 +249,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
           <button
              onClick={onDeleteLabel}
              className="flex items-center justify-center bg-red-900/40 hover:bg-red-600 text-red-200 hover:text-white px-4 rounded transition-colors border border-red-900/50"
-             title="Delete current label"
+             title="Delete current label (Backspace)"
           >
             <Trash2 size={16} />
           </button>

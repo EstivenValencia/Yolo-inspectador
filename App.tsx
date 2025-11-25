@@ -194,10 +194,19 @@ const App: React.FC = () => {
   const handleLabelDelete = () => {
       if (currentLabelIdx >= 0 && currentLabelIdx < currentLabels.length) {
           const newLabels = [...currentLabels];
-          // Splice removes ONLY the element at this index
+          // Removes ONLY the specific label at currentLabelIdx
           newLabels.splice(currentLabelIdx, 1);
+          
           setCurrentLabels(newLabels);
-          setCurrentLabelIdx(-1);
+          
+          // Smart selection: Select previous one, or 0, or -1 if empty
+          if (newLabels.length > 0) {
+              const newIdx = Math.max(0, currentLabelIdx - 1);
+              setCurrentLabelIdx(newIdx);
+          } else {
+              setCurrentLabelIdx(-1);
+          }
+          
           updateRawDataAndSave(newLabels);
       }
   };
@@ -241,7 +250,7 @@ const App: React.FC = () => {
             setLastSaveStatus('error');
         }
 
-      } catch (err) {
+      } catch (err: any) {
           console.error("Failed to save to disk:", err);
           setLastSaveStatus('error');
       }
@@ -275,6 +284,7 @@ const App: React.FC = () => {
                 e.preventDefault();
                 prevLabel();
                 break;
+            case 'n': // Delete Label (Requested shortcut)
             case 'delete':
             case 'backspace':
                 e.preventDefault();
@@ -284,12 +294,18 @@ const App: React.FC = () => {
                 e.preventDefault();
                 setIsCreating(prev => !prev);
                 break;
+            case 'escape': // Cancel create mode
+                if (isCreating) {
+                  e.preventDefault();
+                  setIsCreating(false);
+                }
+                break;
         }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSetup, nextImage, prevImage, nextLabel, prevLabel, handleLabelDelete]);
+  }, [isSetup, nextImage, prevImage, nextLabel, prevLabel, handleLabelDelete, isCreating]);
 
 
   if (!isSetup) {
@@ -323,7 +339,7 @@ const App: React.FC = () => {
                 title="Toggle Create Mode (M)"
              >
                 <PlusSquare size={14} />
-                {isCreating ? 'CREATING MODE (Click & Drag)' : 'Create New Box (M)'}
+                {isCreating ? 'CREATING MODE' : 'Create New Box (M)'}
              </button>
 
              {/* Filter Dropdown */}
@@ -418,6 +434,8 @@ const App: React.FC = () => {
                     onPrevLabel={prevLabel}
                     onUpdateLabel={handleLabelUpdate}
                     onDeleteLabel={handleLabelDelete}
+                    isCreating={isCreating}
+                    onToggleCreateMode={() => setIsCreating(prev => !prev)}
                 />
             </>
         )}
