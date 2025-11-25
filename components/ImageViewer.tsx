@@ -9,6 +9,7 @@ interface ImageViewerProps {
   currentLabelIndex: number;
   classes: string[];
   isCreating?: boolean;
+  showBoxFill?: boolean; // New prop for fill mode
   onSelectLabel: (index: number) => void;
   onUpdateLabel: (label: YoloLabel) => void;
   onCreateLabel?: (label: YoloLabel) => void;
@@ -22,6 +23,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
   currentLabelIndex,
   classes,
   isCreating = false,
+  showBoxFill = false,
   onSelectLabel,
   onUpdateLabel,
   onCreateLabel,
@@ -345,6 +347,15 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                   height: `${height}%`,
                 }}
               >
+                {/* Internal Fill (Visible when 'b' is pressed) */}
+                {showBoxFill && !isCreating && (
+                  <div 
+                     onMouseDown={(e) => startResize(e, 'move', label, idx)}
+                     className="absolute inset-0 cursor-move pointer-events-auto transition-colors"
+                     style={{ backgroundColor: color, opacity: 0.2 }}
+                  />
+                )}
+
                 {/* Borders for interaction */}
                 <div 
                   onMouseDown={(e) => startResize(e, 'move', label, idx)}

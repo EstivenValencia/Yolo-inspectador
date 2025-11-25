@@ -4,7 +4,7 @@ import { ImageViewer } from './components/ImageViewer';
 import { DetailPanel } from './components/DetailPanel';
 import { ImageAsset, YoloLabel, FileSystemFileHandle, FileSystemDirectoryHandle } from './types';
 import { parseYoloString, serializeYoloString } from './utils/yoloHelper';
-import { ArrowLeft, ArrowRight, Image as ImageIcon, Filter, CheckCircle, Save, PlusSquare } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Image as ImageIcon, Filter, CheckCircle, Save, PlusSquare, BoxSelect } from 'lucide-react';
 
 const App: React.FC = () => {
   const [isSetup, setIsSetup] = useState(false);
@@ -22,7 +22,8 @@ const App: React.FC = () => {
   const [panelWidth, setPanelWidth] = useState(400); 
   const [isResizing, setIsResizing] = useState(false);
   const [filterClassId, setFilterClassId] = useState<number>(-1); 
-  const [isCreating, setIsCreating] = useState(false); // New: Creation Mode
+  const [isCreating, setIsCreating] = useState(false); // Creation Mode
+  const [showBoxFill, setShowBoxFill] = useState(false); // Box Fill Mode (Key: b)
   
   // Working State
   const [currentLabels, setCurrentLabels] = useState<YoloLabel[]>([]);
@@ -284,7 +285,7 @@ const App: React.FC = () => {
                 e.preventDefault();
                 prevLabel();
                 break;
-            case 'n': // Delete Label (Requested shortcut)
+            case 'n': // Delete Label
             case 'delete':
             case 'backspace':
                 e.preventDefault();
@@ -293,6 +294,10 @@ const App: React.FC = () => {
             case 'm': // Mode: Create
                 e.preventDefault();
                 setIsCreating(prev => !prev);
+                break;
+            case 'b': // Mode: Box Fill
+                e.preventDefault();
+                setShowBoxFill(prev => !prev);
                 break;
             case 'escape': // Cancel create mode
                 if (isCreating) {
@@ -332,6 +337,16 @@ const App: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-4">
+             {/* Box Fill Toggle */}
+             <button 
+                onClick={() => setShowBoxFill(!showBoxFill)}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-bold transition-all border ${showBoxFill ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'}`}
+                title="Toggle Box Fill (B)"
+             >
+                <BoxSelect size={14} />
+                {showBoxFill ? 'Fill On (B)' : 'Fill Off (B)'}
+             </button>
+
              {/* Mode Indicator Button */}
              <button 
                 onClick={() => setIsCreating(!isCreating)}
@@ -389,7 +404,7 @@ const App: React.FC = () => {
             {lastSaveStatus === 'error' && (
                 <span className="text-xs text-red-400">Save Error</span>
             )}
-            <span className="text-xs text-slate-600 ml-2">v1.5.0</span>
+            <span className="text-xs text-slate-600 ml-2">v1.6.0</span>
         </div>
       </header>
 
@@ -409,6 +424,7 @@ const App: React.FC = () => {
                     currentLabelIndex={currentLabelIdx}
                     classes={classes}
                     isCreating={isCreating}
+                    showBoxFill={showBoxFill}
                     onSelectLabel={setCurrentLabelIdx}
                     onUpdateLabel={handleLabelUpdate}
                     onCreateLabel={handleLabelCreate}
