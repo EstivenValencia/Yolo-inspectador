@@ -100,6 +100,9 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
     if (!resizing && (e.button === 0 || e.button === 1)) {
         e.preventDefault(); 
         setIsPanning(true);
+        // Deselect current label if clicking on empty space
+        onSelectLabel(-1);
+        
         startDrag.current.mouseX = e.clientX;
         startDrag.current.mouseY = e.clientY;
         startDrag.current.transformX = transform.x;

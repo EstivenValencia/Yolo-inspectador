@@ -176,23 +176,35 @@ const App: React.FC = () => {
     if (currentLabelIdx >= 0 && currentLabelIdx < newLabels.length) {
         newLabels[currentLabelIdx] = updatedLabel;
         setCurrentLabels(newLabels);
-        
-        // Update raw map immediately
-        if (filteredImages[currentImageIdx]) {
-            const imgKey = filteredImages[currentImageIdx].name.replace(/\.[^/.]+$/, "");
-            const newRaw = serializeYoloString(newLabels);
-            
-            const newLabelsMap = new Map(labelsRaw);
-            newLabelsMap.set(imgKey, newRaw);
-            setLabelsRaw(newLabelsMap);
-
-            // Mark as unsaved
-            const newUnsaved = new Map(unsavedMap);
-            newUnsaved.set(imgKey, true);
-            setUnsavedMap(newUnsaved);
-        }
+        updateRawData(newLabels);
     }
   };
+
+  const handleLabelDelete = () => {
+      if (currentLabelIdx >= 0 && currentLabelIdx < currentLabels.length) {
+          const newLabels = [...currentLabels];
+          newLabels.splice(currentLabelIdx, 1);
+          setCurrentLabels(newLabels);
+          setCurrentLabelIdx(-1); // Deselect
+          updateRawData(newLabels);
+      }
+  };
+
+  const updateRawData = (newLabels: YoloLabel[]) => {
+      if (filteredImages[currentImageIdx]) {
+        const imgKey = filteredImages[currentImageIdx].name.replace(/\.[^/.]+$/, "");
+        const newRaw = serializeYoloString(newLabels);
+        
+        const newLabelsMap = new Map(labelsRaw);
+        newLabelsMap.set(imgKey, newRaw);
+        setLabelsRaw(newLabelsMap);
+
+        // Mark as unsaved
+        const newUnsaved = new Map(unsavedMap);
+        newUnsaved.set(imgKey, true);
+        setUnsavedMap(newUnsaved);
+    }
+  }
 
   // --- Download Handler ---
   const handleDownload = () => {
@@ -245,6 +257,11 @@ const App: React.FC = () => {
                 e.preventDefault();
                 prevLabel();
                 break;
+            case 'delete':
+            case 'backspace':
+                e.preventDefault();
+                handleLabelDelete();
+                break;
         }
 
         if (e.key === 's' || e.key === 'S') {
@@ -257,7 +274,7 @@ const App: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSetup, nextImage, prevImage, nextLabel, prevLabel, handleDownload]);
+  }, [isSetup, nextImage, prevImage, nextLabel, prevLabel, handleDownload, handleLabelDelete]);
 
 
   if (!isSetup) {
@@ -373,6 +390,7 @@ const App: React.FC = () => {
                     onNextLabel={nextLabel}
                     onPrevLabel={prevLabel}
                     onUpdateLabel={handleLabelUpdate}
+                    onDeleteLabel={handleLabelDelete}
                     onDownloadLabels={handleDownload}
                     hasUnsavedChanges={hasUnsaved}
                 />

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { YoloLabel, ImageAsset } from '../types';
-import { ChevronLeft, ChevronRight, Save, AlertTriangle, Tag, MousePointerClick, Maximize2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Save, AlertTriangle, Tag, MousePointerClick, Maximize2, Trash2 } from 'lucide-react';
 import { getColor } from '../utils/yoloHelper';
 
 interface DetailPanelProps {
@@ -13,6 +13,7 @@ interface DetailPanelProps {
   onNextLabel: () => void;
   onPrevLabel: () => void;
   onUpdateLabel: (updatedLabel: YoloLabel) => void;
+  onDeleteLabel: () => void;
   onDownloadLabels: () => void;
   hasUnsavedChanges: boolean;
 }
@@ -27,6 +28,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   onNextLabel,
   onPrevLabel,
   onUpdateLabel,
+  onDeleteLabel,
   onDownloadLabels,
   hasUnsavedChanges
 }) => {
@@ -248,14 +250,25 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
           <button 
             onClick={onPrevLabel}
             className="flex-1 flex items-center justify-center gap-1 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded transition-colors text-sm"
+            title="Previous Defect"
           >
-            <ChevronLeft size={16} /> Prev
+            <ChevronLeft size={16} />
           </button>
+
+          <button
+             onClick={onDeleteLabel}
+             className="flex items-center justify-center bg-red-900/40 hover:bg-red-600 text-red-200 hover:text-white px-4 rounded transition-colors border border-red-900/50"
+             title="Delete current label"
+          >
+            <Trash2 size={16} />
+          </button>
+          
           <button 
             onClick={onNextLabel}
             className="flex-1 flex items-center justify-center gap-1 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded transition-colors text-sm"
+            title="Next Defect"
           >
-            Next <ChevronRight size={16} />
+            <ChevronRight size={16} />
           </button>
         </div>
       </div>
