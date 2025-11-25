@@ -54,6 +54,13 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
     label: { classId: 0, x: 0, y: 0, w: 0, h: 0 } 
   });
 
+  // Helper to force focus to this component
+  const focusViewer = () => {
+    if (viewportRef.current) {
+      viewportRef.current.focus();
+    }
+  };
+
   // Reset zoom on image change
   useEffect(() => {
     setTransform({ scale: 1, x: 0, y: 0 });
@@ -107,6 +114,9 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
   }, []);
 
   const handleMouseDown = (e: React.MouseEvent) => {
+    // Force focus to main window to enable shortcuts
+    focusViewer();
+
     // 1. CREATION LOGIC
     if (isCreating && contentRef.current) {
         e.preventDefault();
@@ -138,6 +148,8 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
   };
 
   const startResize = (e: React.MouseEvent, handle: ResizeHandle, label: YoloLabel, idx: number) => {
+    focusViewer(); // Ensure focus when clicking a box too
+    
     if (isCreating) return; // Disable selection/resize while creating
     e.stopPropagation(); // Prevent panning
     e.preventDefault();
@@ -276,7 +288,8 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
     <div 
       ref={viewportRef}
       onMouseDown={handleMouseDown}
-      className={`flex-1 bg-slate-950 flex items-center justify-center overflow-hidden relative ${isCreating ? 'cursor-crosshair' : (isPanning ? 'cursor-grabbing' : 'cursor-grab')}`}
+      tabIndex={-1} // Allow div to receive focus
+      className={`flex-1 bg-slate-950 flex items-center justify-center overflow-hidden relative outline-none ${isCreating ? 'cursor-crosshair' : (isPanning ? 'cursor-grabbing' : 'cursor-grab')}`}
     >
         <div className="absolute top-4 right-4 z-50 flex flex-col gap-2">
             {(transform.scale !== 1 || transform.x !== 0 || transform.y !== 0) && (
