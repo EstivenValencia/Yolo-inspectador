@@ -93,9 +93,6 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
                 handle: fileHandle
               });
           }
-        } else if (entry.kind === 'directory') {
-          // Optional: Recursive scan if needed, currently disabled for flat structure per YOLO standard usually
-          // await traverse(entry as FileSystemDirectoryHandle); 
         }
       }
     }
@@ -138,8 +135,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
         setLoading(true);
         setError(null);
 
-        // 1. Re-verify permissions for Image Folder
-        // 'true' means readWrite. We might need write permissions to create folders.
+        // 1. Verify Image Folder Permission (Prompt only if needed, NO picker)
         const imgAccess = await verifyPermission(session.imagesHandle, true); 
         if (!imgAccess) throw new Error("Permission to image folder denied.");
         
@@ -149,7 +145,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
         const loadedImages = await scanDirectoryForImages(session.imagesHandle);
         setImages(loadedImages);
 
-        // 3. Re-verify Labels Folder
+        // 3. Verify Labels Folder Permission
         const lblAccess = await verifyPermission(session.labelsHandle, true);
         if (!lblAccess) throw new Error("Permission to label folder denied.");
         
@@ -159,7 +155,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
         setLabels(newLabels);
         setLabelHandles(newHandles);
 
-        // 4. Classes (Optional)
+        // 4. Verify Classes File Permission
         let loadedClasses: string[] = [];
         let loadedClassHandle: FileSystemFileHandle | null = null;
 
@@ -170,26 +166,14 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
                  loadedClassHandle = session.classHandle;
                  setClassFileHandle(session.classHandle);
                  setClassFileName(session.classHandle.name);
+             } else {
+                 throw new Error("Permission to classes file denied.");
              }
-        } else {
-             // Try to find classes.txt in the label dir
-             try {
-                loadedClassHandle = await session.labelsHandle.getFileHandle('classes.txt');
-                loadedClasses = await parseClassesFile(loadedClassHandle);
-                setClassFileHandle(loadedClassHandle);
-                setClassFileName('classes.txt');
-             } catch {
-                // If not found, we will create it in onComplete/Start phase or leave empty
-                loadedClasses = [];
-             }
-        }
+        } 
         
         setClasses(loadedClasses);
 
-        // Update DB with new timestamp
-        await saveSessionToDB({ ...session, id: Date.now(), date: new Date().toLocaleString() });
-
-        // Trigger complete immediately without user clicking start again
+        // Trigger complete
         onComplete(
             loadedImages, 
             newLabels, 
@@ -200,8 +184,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
         );
 
     } catch (err: any) {
-        setError(err.message || "Failed to restore session. Folders might have moved or permissions denied.");
-    } finally {
+        setError(err.message || "Failed to restore session.");
         setLoading(false);
     }
   };
@@ -261,22 +244,26 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
     }
 
     setLoading(true);
+    
+    // We work with local variables to establish the final handles
+    let finalImagesHandle = imagesDirHandle;
     let finalLabelsHandle = labelsDirHandle;
-    let finalClasses = [...classes];
-    let finalLabelHandles = new Map(labelHandles);
-    let finalLabelsData = new Map(labels);
     let finalClassFileHandle = classFileHandle;
+    
+    let finalLabelsData = new Map(labels);
+    let finalLabelHandles = new Map(labelHandles);
+    let finalClasses = [...classes];
 
     try {
-        // 1. Logic: If no Label Folder, create/use 'labels' folder inside Image Folder
+        // 1. Logic: If no Label Folder, create 'labels' folder inside Image Folder
         if (!finalLabelsHandle) {
             try {
-                // Try to get or create 'labels' directory inside the image directory
-                // Note: This requires readwrite permission on image directory.
-                finalLabelsHandle = await imagesDirHandle.getDirectoryHandle('labels', { create: true });
+                // Request 'labels' dir. create: true makes it if missing.
+                finalLabelsHandle = await finalImagesHandle.getDirectoryHandle('labels', { create: true });
                 setLabelsDirHandle(finalLabelsHandle);
+                setLabelsFolderName(finalLabelsHandle.name);
                 
-                // Scan this new (or existing) folder just in case
+                // Scan it (likely empty if just created, but good practice)
                 const scan = await scanDirectoryForLabels(finalLabelsHandle);
                 finalLabelsData = scan.newLabels;
                 finalLabelHandles = scan.newHandles;
@@ -284,40 +271,35 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
             } catch (e) {
                 console.error("Could not create labels subfolder", e);
                 // Fallback: Use root images folder
-                finalLabelsHandle = imagesDirHandle;
-                const scan = await scanDirectoryForLabels(imagesDirHandle);
+                finalLabelsHandle = finalImagesHandle;
+                const scan = await scanDirectoryForLabels(finalImagesHandle);
                 finalLabelsData = scan.newLabels;
                 finalLabelHandles = scan.newHandles;
             }
         }
 
-        // 2. Logic: If no classes loaded, look for classes.txt in the final label dir OR create it
+        // 2. Logic: If no Classes File, create empty 'classes.txt' inside Label Folder
         if (!finalClassFileHandle) {
              try {
-                 // Try to open existing
-                 finalClassFileHandle = await finalLabelsHandle.getFileHandle('classes.txt');
+                 // create: true will create empty file if not exists
+                 finalClassFileHandle = await finalLabelsHandle.getFileHandle('classes.txt', { create: true });
+                 // If it was just created, it's empty. If it existed, we read it.
                  finalClasses = await parseClassesFile(finalClassFileHandle);
              } catch (e) {
-                 // File doesn't exist. Create it (Empty).
-                 try {
-                     finalClassFileHandle = await finalLabelsHandle.getFileHandle('classes.txt', { create: true });
-                     // It's empty, so finalClasses is empty array
-                     finalClasses = [];
-                 } catch (createErr) {
-                     console.error("Could not create classes.txt", createErr);
-                     finalClasses = []; // Start empty
-                 }
+                 console.error("Could not create/read classes.txt", e);
+                 // Proceed with empty classes, but without a file handle for saving new ones
+                 finalClasses = [];
              }
         }
 
-        // 3. Save to History (IndexedDB)
+        // 3. Save ALL handles to History (IndexedDB)
         const session: StoredSession = {
             id: Date.now(),
             date: new Date().toLocaleString(),
-            imagesHandle: imagesDirHandle,
-            labelsHandle: finalLabelsHandle!,
-            classHandle: finalClassFileHandle || undefined,
-            imagesFolderName: imagesDirHandle.name,
+            imagesHandle: finalImagesHandle,
+            labelsHandle: finalLabelsHandle!, // Asserted because of Step 1
+            classHandle: finalClassFileHandle || undefined, // Important to save this
+            imagesFolderName: finalImagesHandle.name,
             labelsFolderName: finalLabelsHandle!.name
         };
         await saveSessionToDB(session);
@@ -349,14 +331,14 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
                 onClick={() => setShowTutorial(true)}
                 className="text-slate-400 hover:text-indigo-400 transition-colors flex items-center gap-2 text-sm font-semibold bg-slate-700/50 px-3 py-1.5 rounded-lg border border-slate-700 hover:border-indigo-500/50"
             >
-                <BookOpen size={16} /> Guide
+                <BookOpen size={16} /> Manual de Usuario
             </button>
         </div>
         
         <p className="text-slate-400 mb-8">
-            Load your local dataset folders. 
+            Select your dataset folders. 
             <span className="block text-indigo-400 text-xs mt-2 font-semibold">
-                Changes will be auto-saved to disk.
+                Configs are auto-saved. Folders/files will be created if missing.
             </span>
         </p>
 
@@ -365,7 +347,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
             {history.length > 0 && images.length === 0 && (
                 <div className="bg-slate-900/30 p-4 rounded-lg border border-slate-700/50 mb-6">
                     <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-                        <Clock size={14} /> Recent Sessions
+                        <Clock size={14} /> Recientes (Carga Automática)
                     </h3>
                     <div className="space-y-2">
                         {history.map(item => (
@@ -396,15 +378,15 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
                    <FolderInput size={24} />
                </div>
                <div>
-                   <h3 className="font-semibold text-slate-200">Images Folder <span className="text-red-400">*</span></h3>
-                   <p className="text-xs text-slate-500">{images.length > 0 ? `${images.length} images loaded (${imagesFolderName})` : 'Required'}</p>
+                   <h3 className="font-semibold text-slate-200">Carpeta de Imágenes <span className="text-red-400">*</span></h3>
+                   <p className="text-xs text-slate-500">{images.length > 0 ? `${images.length} imágenes cargadas (${imagesFolderName})` : 'Obligatorio'}</p>
                </div>
             </div>
             <button 
                 onClick={handleSelectImageFolder}
                 className={`px-4 py-2 rounded text-sm font-bold transition-colors ${images.length > 0 ? 'bg-indigo-600 hover:bg-indigo-500 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-300'}`}
             >
-                {images.length > 0 ? 'Change Folder' : 'Select Folder'}
+                {images.length > 0 ? 'Cambiar Carpeta' : 'Seleccionar'}
             </button>
           </div>
 
@@ -415,9 +397,9 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
                    <FolderInput size={24} />
                </div>
                <div>
-                   <h3 className="font-semibold text-slate-200">Labels Folder</h3>
+                   <h3 className="font-semibold text-slate-200">Carpeta de Etiquetas</h3>
                    <p className="text-xs text-slate-500">
-                       {labels.size > 0 ? `${labels.size} labels loaded (${labelsFolderName})` : 'Optional. Will create "labels" inside Images if missing.'}
+                       {labels.size > 0 ? `${labels.size} etiquetas cargadas (${labelsFolderName})` : 'Opcional. Se creará "labels" en Imágenes si falta.'}
                    </p>
                </div>
             </div>
@@ -425,7 +407,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
                 onClick={handleSelectLabelFolder}
                 className={`px-4 py-2 rounded text-sm font-bold transition-colors ${labels.size > 0 ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-300'}`}
             >
-                {labels.size > 0 ? 'Change Folder' : 'Select Folder'}
+                {labels.size > 0 ? 'Cambiar Carpeta' : 'Seleccionar'}
             </button>
           </div>
 
@@ -436,15 +418,15 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
                    <FileText size={24} />
                </div>
                <div>
-                   <h3 className="font-semibold text-slate-200">Classes File</h3>
-                   <p className="text-xs text-slate-500">{classFileHandle ? `Loaded (${classFileName})` : 'Optional. Will create empty classes.txt if missing.'}</p>
+                   <h3 className="font-semibold text-slate-200">Archivo de Clases</h3>
+                   <p className="text-xs text-slate-500">{classFileHandle ? `Cargado (${classFileName})` : 'Opcional. Se creará vacio si falta.'}</p>
                </div>
             </div>
             <button 
                 onClick={handleSelectClassFile}
                 className={`px-4 py-2 rounded text-sm font-bold transition-colors ${classFileHandle ? 'bg-amber-600 hover:bg-amber-500 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-300'}`}
             >
-                {classFileHandle ? 'Change File' : 'Select File'}
+                {classFileHandle ? 'Cambiar Archivo' : 'Seleccionar'}
             </button>
           </div>
 
@@ -456,7 +438,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
           )}
           
           {loading && (
-             <div className="text-center text-sm text-slate-400 animate-pulse">Processing files...</div>
+             <div className="text-center text-sm text-slate-400 animate-pulse">Procesando archivos...</div>
           )}
 
           <button
@@ -467,7 +449,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
                 ? 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white shadow-lg shadow-indigo-500/20' 
                 : 'bg-slate-700 text-slate-500 cursor-not-allowed'}`}
           >
-            Start Inspection <Upload size={20} />
+            Comenzar Inspección <Upload size={20} />
           </button>
         </div>
       </div>
@@ -477,22 +459,22 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
             <div className="bg-slate-800 border-2 border-indigo-500/30 rounded-2xl shadow-2xl p-8 max-w-md w-full text-center">
                 <HelpCircle size={48} className="text-indigo-400 mx-auto mb-4" />
-                <h2 className="text-2xl font-bold text-white mb-2">Welcome!</h2>
+                <h2 className="text-2xl font-bold text-white mb-2">¡Bienvenido!</h2>
                 <p className="text-slate-300 mb-8">
-                    Is this your first time using YOLO Inspector? Would you like a quick tour of the features?
+                    ¿Es tu primera vez aquí? ¿Te gustaría ver una guía rápida de cómo utilizar la plataforma?
                 </p>
                 <div className="flex gap-4">
                     <button 
                         onClick={() => handleIntroResponse(false)}
                         className="flex-1 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-semibold transition-colors"
                     >
-                        No, skip it
+                        No, gracias
                     </button>
                     <button 
                         onClick={() => handleIntroResponse(true)}
                         className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold shadow-lg shadow-indigo-500/25 transition-all"
                     >
-                        Yes, show me
+                        Sí, enséñame
                     </button>
                 </div>
             </div>

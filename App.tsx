@@ -148,6 +148,8 @@ const App: React.FC = () => {
   const filteredClassList = useMemo(() => {
       const term = classSearchTerm.toLowerCase();
       if (!term) return classes.map((c, i) => ({ index: i, name: c }));
+      
+      // Filter list: only show classes that include the term
       return classes
         .map((c, i) => ({ index: i, name: c }))
         .filter(item => item.name.toLowerCase().includes(term));
@@ -347,15 +349,31 @@ const App: React.FC = () => {
     const handleKeyDown = (e: KeyboardEvent) => {
         // If typing in search box, don't trigger standard shortcuts except navigation within modal
         if (showClassSelector) {
-            if (key === 'escape') {
+            if (e.key === 'Escape') {
                 e.preventDefault();
                 setShowClassSelector(false);
-            } else if (key === 'enter') {
+            } else if (e.key === 'Enter') {
                 e.preventDefault();
+                // Logic: 
+                // 1. If user typed "barrido" and filtered list is EMPTY -> CREATE "barrido"
+                // 2. If user typed "ba" and filtered list has "basura" -> SELECT "basura"
+                // 3. If user typed "basura" and it exists -> SELECT "basura"
+
+                const hasExactMatch = filteredClassList.find(c => c.name.toLowerCase() === classSearchTerm.toLowerCase());
                 const hasMatches = filteredClassList.length > 0;
                 
-                if (hasMatches) {
-                   // Select existing
+                if (hasExactMatch) {
+                   // Exact match found (case insensitive)
+                   if (currentLabels[currentLabelIdx]) {
+                        handleLabelUpdate({
+                            ...currentLabels[currentLabelIdx],
+                            classId: hasExactMatch.index
+                        });
+                        setShowClassSelector(false);
+                   }
+                } else if (hasMatches && classSearchTerm.length < 3) {
+                   // If purely searching (short term) and list has items, assume selection
+                   // e.g. "ba" -> select first item "basura"
                    const selectedClass = filteredClassList[selectorIndex];
                    if (selectedClass && currentLabels[currentLabelIdx]) {
                         handleLabelUpdate({
@@ -365,7 +383,10 @@ const App: React.FC = () => {
                         setShowClassSelector(false);
                    }
                 } else if (classSearchTerm.trim().length > 0) {
-                    // Create New
+                    // Create New because specific term was typed and no exact match
+                    // This handles: "barrido" (list empty) -> create
+                    // This handles: "Cart" (list has "Car", but "Cart" != "Car") -> create
+                    
                     handleAddNewClass(classSearchTerm).then((newId) => {
                         if (newId !== undefined && currentLabels[currentLabelIdx]) {
                             handleLabelUpdate({
@@ -375,12 +396,22 @@ const App: React.FC = () => {
                         }
                         setShowClassSelector(false);
                     });
+                } else if (hasMatches) {
+                     // Fallback for empty search term + Enter -> Select currently highlighted
+                     const selectedClass = filteredClassList[selectorIndex];
+                     if (selectedClass && currentLabels[currentLabelIdx]) {
+                        handleLabelUpdate({
+                            ...currentLabels[currentLabelIdx],
+                            classId: selectedClass.index
+                        });
+                        setShowClassSelector(false);
+                   }
                 }
 
-            } else if (key === 'arrowup') {
+            } else if (e.key === 'ArrowUp') {
                 e.preventDefault();
                 setSelectorIndex(prev => Math.max(0, prev - 1));
-            } else if (key === 'arrowdown') {
+            } else if (e.key === 'ArrowDown') {
                 e.preventDefault();
                 setSelectorIndex(prev => Math.min(filteredClassList.length - 1, prev + 1));
             }
@@ -590,7 +621,7 @@ const App: React.FC = () => {
             {lastSaveStatus === 'error' && (
                 <span className="text-xs text-red-400">Save Error</span>
             )}
-            <span className="text-xs text-slate-600 ml-2">v2.0.0</span>
+            <span className="text-xs text-slate-600 ml-2">v2.1.0</span>
         </div>
       </header>
 
@@ -749,7 +780,19 @@ const App: React.FC = () => {
                         {filteredClassList.length === 0 && classSearchTerm.length > 0 ? (
                              <div className="flex flex-col items-center justify-center h-full text-slate-400 p-4">
                                 <p className="text-sm mb-2">No existing class found.</p>
-                                <div className="flex items-center gap-2 text-indigo-400 bg-indigo-900/30 px-3 py-2 rounded-lg border border-indigo-500/30">
+                                <div className="flex items-center gap-2 text-indigo-400 bg-indigo-900/30 px-3 py-2 rounded-lg border border-indigo-500/30 cursor-pointer hover:bg-indigo-900/50 transition-colors"
+                                     onClick={() => {
+                                        handleAddNewClass(classSearchTerm).then((newId) => {
+                                            if (newId !== undefined && currentLabels[currentLabelIdx]) {
+                                                handleLabelUpdate({
+                                                    ...currentLabels[currentLabelIdx],
+                                                    classId: newId
+                                                });
+                                            }
+                                            setShowClassSelector(false);
+                                        });
+                                     }}
+                                >
                                     <PlusCircle size={16} />
                                     <span className="text-sm font-bold">Press Enter to create "{classSearchTerm}"</span>
                                 </div>
