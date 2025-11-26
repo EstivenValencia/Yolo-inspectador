@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { YoloLabel, ImageAsset } from '../types';
-import { ChevronLeft, ChevronRight, AlertTriangle, Tag, MousePointerClick, Maximize2, Trash2, Info, Plus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, AlertTriangle, Tag, MousePointerClick, Maximize2, Trash2, Info, Plus, ZoomIn } from 'lucide-react';
 import { getColor } from '../utils/yoloHelper';
 
 interface DetailPanelProps {
@@ -16,6 +16,8 @@ interface DetailPanelProps {
   onDeleteLabel: () => void;
   isCreating: boolean;
   onToggleCreateMode: () => void;
+  zoomSettings: { context: number, mag: number };
+  onZoomSettingsChange: (settings: { context: number, mag: number }) => void;
 }
 
 export const DetailPanel: React.FC<DetailPanelProps> = ({
@@ -31,25 +33,23 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   onDeleteLabel,
   isCreating,
   onToggleCreateMode,
+  zoomSettings,
+  onZoomSettingsChange,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const zoomContainerRef = useRef<HTMLDivElement>(null);
   const [imgElement, setImgElement] = useState<HTMLImageElement | null>(null);
   
-  // Context Padding (Scale Multiplier)
-  // 0 = Tight crop (approx 1.2x size)
-  // 100 = Wide crop (approx 5x size)
-  const [contextPadding, setContextPadding] = useState(30);
-  
+  // Extract persistent zoom settings
+  const { context: contextPadding, mag: magnification } = zoomSettings;
+
   // Zoom & Pan for Right Panel
-  const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const dragStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
 
-  // Reset zoom/pan when label changes
+  // Reset pan when label changes
   useEffect(() => {
-    setZoom(1);
     setPan({ x: 0, y: 0 });
   }, [currentLabelIndex, currentImage]);
 
@@ -71,10 +71,11 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     const imgW = imgElement.naturalWidth;
     const imgH = imgElement.naturalHeight;
     
-    // NEW LOGIC: Crop is relative to the defect size
-    // Calculate expansion factor based on slider (0-100) maps to (1.2x - 6.0x) size
-    // This ensures small defects are ZOOMED IN, not lost in a large crop
-    const expansionFactor = 1.2 + (contextPadding / 100) * 4.0; 
+    // CONTEXT LOGIC: How much surrounding area do we capture?
+    // Slider (0-100) -> Factor (1.1x to 5.0x)
+    // 0 -> Tight crop
+    // 100 -> Wide crop
+    const expansionFactor = 1.1 + (contextPadding / 100) * 4.0; 
 
     // Calculate crop dimensions relative to label size
     const cropW = currentLabel.w * expansionFactor;
@@ -94,7 +95,6 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     const pxHeight = (cBottom - cTop) * imgH;
 
     // Set canvas size to the Pixel dimensions of the crop
-    // This forces the browser to scale this UP to fit the CSS container, creating the "Zoom" effect
     canvasRef.current.width = Math.max(1, pxWidth);
     canvasRef.current.height = Math.max(1, pxHeight);
 
@@ -104,7 +104,6 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     ctx.drawImage(imgElement, pxLeft, pxTop, pxWidth, pxHeight, 0, 0, pxWidth, pxHeight);
 
     // Draw the Box on the canvas
-    // We need to translate the global coordinates to the crop-local coordinates
     const boxX = (currentLabel.x * imgW) - (currentLabel.w * imgW) / 2 - pxLeft;
     const boxY = (currentLabel.y * imgH) - (currentLabel.h * imgH) / 2 - pxTop;
     const boxW = currentLabel.w * imgW;
@@ -116,26 +115,6 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     ctx.strokeRect(boxX, boxY, boxW, boxH);
 
   }, [currentLabel, imgElement, contextPadding]); 
-
-  // --- Zoom Logic for Right Panel ---
-  useEffect(() => {
-    const container = zoomContainerRef.current;
-    if (!container) return;
-
-    const onWheel = (e: WheelEvent) => {
-        if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            e.stopPropagation();
-            let delta = e.deltaY;
-            if (e.deltaMode === 1) delta *= 33;
-            if (e.deltaMode === 2) delta *= 800;
-            const s = Math.exp(-delta * 0.0015);
-            setZoom(prev => Math.min(Math.max(1, prev * s), 20)); 
-        }
-    };
-    container.addEventListener('wheel', onWheel, { passive: false });
-    return () => container.removeEventListener('wheel', onWheel);
-  }, []);
 
   // --- Pan Logic for Right Panel ---
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -212,19 +191,44 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
            </div>
         </div>
 
-        {/* Context Slider */}
-        <div className="flex items-center gap-3 bg-slate-800 p-2 rounded-lg border border-slate-700">
-             <Maximize2 size={14} className="text-slate-400" />
-             <input 
-                type="range" 
-                min="0" 
-                max="100" 
-                value={contextPadding} 
-                onChange={(e) => setContextPadding(parseInt(e.target.value))}
-                className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-                title="Adjust Zoom Level around the defect"
-             />
-             <span className="text-[10px] w-8 text-right text-slate-400">{contextPadding}%</span>
+        {/* Sliders Control Group */}
+        <div className="grid grid-cols-1 gap-2 bg-slate-800 p-3 rounded-lg border border-slate-700">
+            {/* Context Slider */}
+            <div className="flex items-center gap-3">
+                 <Maximize2 size={14} className="text-slate-400" />
+                 <div className="flex-1 flex flex-col">
+                     <span className="text-[10px] text-slate-500 uppercase font-bold">Crop Context</span>
+                     <input 
+                        type="range" 
+                        min="0" 
+                        max="100" 
+                        value={contextPadding} 
+                        onChange={(e) => onZoomSettingsChange({...zoomSettings, context: parseInt(e.target.value)})}
+                        className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-indigo-500 mt-1"
+                        title="Adjust area around the defect"
+                     />
+                 </div>
+                 <span className="text-[10px] w-8 text-right text-slate-400">{contextPadding}%</span>
+            </div>
+
+            {/* Magnification Slider */}
+             <div className="flex items-center gap-3 mt-1">
+                 <ZoomIn size={14} className="text-slate-400" />
+                 <div className="flex-1 flex flex-col">
+                     <span className="text-[10px] text-slate-500 uppercase font-bold">Magnification</span>
+                     <input 
+                        type="range" 
+                        min="1" 
+                        max="10" 
+                        step="0.1"
+                        value={magnification} 
+                        onChange={(e) => onZoomSettingsChange({...zoomSettings, mag: parseFloat(e.target.value)})}
+                        className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-emerald-500 mt-1"
+                        title="Zoom Level (Scale)"
+                     />
+                 </div>
+                 <span className="text-[10px] w-8 text-right text-slate-400">{magnification.toFixed(1)}x</span>
+            </div>
         </div>
         
         {/* Canvas Container */}
@@ -235,17 +239,13 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
         >
           <div 
              className="relative transition-transform duration-75 ease-out w-full h-full flex items-center justify-center"
-             style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
+             style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${magnification})` }}
           >
             <canvas 
                 ref={canvasRef} 
                 className="max-w-full max-h-full object-contain pointer-events-none image-pixelated"
                 style={{ imageRendering: 'pixelated' }} // Ensures small defects look sharp when zoomed up
             />
-          </div>
-          
-          <div className="absolute bottom-2 right-2 bg-black/60 px-2 py-1 rounded text-[10px] text-slate-300 pointer-events-none">
-              Ctrl+Scroll: {zoom.toFixed(1)}x
           </div>
         </div>
         

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Upload, FolderInput, FileText, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Upload, FolderInput, FileText, AlertCircle, Clock, ArrowRight } from 'lucide-react';
 import { ImageAsset, FileSystemDirectoryHandle, FileSystemFileHandle } from '../types';
 
 declare global {
@@ -19,18 +19,57 @@ interface SetupScreenProps {
   ) => void;
 }
 
+interface SessionHistory {
+    id: number;
+    date: string;
+    imagesFolderName: string;
+    labelsFolderName: string;
+}
+
 export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
   const [images, setImages] = useState<ImageAsset[]>([]);
   const [labels, setLabels] = useState<Map<string, string>>(new Map());
   const [labelHandles, setLabelHandles] = useState<Map<string, FileSystemFileHandle>>(new Map());
   const [labelsDirHandle, setLabelsDirHandle] = useState<FileSystemDirectoryHandle | null>(null);
   
+  // Folder Names for History
+  const [imagesFolderName, setImagesFolderName] = useState<string>("");
+  const [labelsFolderName, setLabelsFolderName] = useState<string>("");
+
   const [classes, setClasses] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [history, setHistory] = useState<SessionHistory[]>([]);
 
   // Helper to check API support
   const hasFileSystemApi = typeof window.showDirectoryPicker === 'function';
+
+  useEffect(() => {
+      try {
+          const saved = localStorage.getItem('yolo_inspector_history');
+          if (saved) {
+              setHistory(JSON.parse(saved));
+          }
+      } catch (e) {
+          console.error("Failed to load history", e);
+      }
+  }, []);
+
+  const addToHistory = (imgName: string, lblName: string) => {
+      const newEntry: SessionHistory = {
+          id: Date.now(),
+          date: new Date().toLocaleString(),
+          imagesFolderName: imgName,
+          labelsFolderName: lblName
+      };
+      
+      // Keep last 3, unique by name combination
+      const filtered = history.filter(h => h.imagesFolderName !== imgName || h.labelsFolderName !== lblName);
+      const newHistory = [newEntry, ...filtered].slice(0, 3);
+      
+      setHistory(newHistory);
+      localStorage.setItem('yolo_inspector_history', JSON.stringify(newHistory));
+  };
 
   const scanDirectory = async (dirHandle: FileSystemDirectoryHandle, fileType: 'image' | 'text'): Promise<File[]> => {
     const files: File[] = [];
@@ -66,6 +105,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
       
       const dirHandle = await window.showDirectoryPicker({ id: 'images', mode: 'read' });
       setLoading(true);
+      setImagesFolderName(dirHandle.name);
       
       const fileList = await scanDirectory(dirHandle, 'image');
       
@@ -92,6 +132,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
 
       const dirHandle = await window.showDirectoryPicker({ id: 'labels', mode: 'readwrite' }); // Request Write access
       setLabelsDirHandle(dirHandle);
+      setLabelsFolderName(dirHandle.name);
       setLoading(true);
 
       const fileList = await scanDirectory(dirHandle, 'text');
@@ -143,6 +184,11 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
     }
     const finalClasses = classes.length > 0 ? classes : Array.from({ length: 80 }, (_, i) => `Class ${i}`);
     
+    // Save to history
+    if (imagesFolderName && labelsFolderName) {
+        addToHistory(imagesFolderName, labelsFolderName);
+    }
+
     onComplete(images, labels, labelHandles, labelsDirHandle, finalClasses);
   };
 
@@ -158,6 +204,36 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
         </p>
 
         <div className="space-y-6">
+            {/* History Quick Select */}
+            {history.length > 0 && images.length === 0 && (
+                <div className="bg-slate-900/30 p-4 rounded-lg border border-slate-700/50 mb-6">
+                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                        <Clock size={14} /> Recent Sessions
+                    </h3>
+                    <div className="space-y-2">
+                        {history.map(item => (
+                            <button 
+                                key={item.id}
+                                onClick={() => {
+                                    // We can't auto-load, but we can visual prompt
+                                    handleSelectImageFolder();
+                                }}
+                                className="w-full text-left p-3 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-indigo-500/50 transition-all group"
+                            >
+                                <div className="flex justify-between items-center">
+                                    <div>
+                                        <div className="text-sm font-semibold text-slate-200 group-hover:text-indigo-300">
+                                            {item.imagesFolderName} <span className="text-slate-500 mx-1">+</span> {item.labelsFolderName}
+                                        </div>
+                                        <div className="text-[10px] text-slate-500">{item.date}</div>
+                                    </div>
+                                    <ArrowRight size={14} className="text-slate-600 group-hover:text-indigo-400" />
+                                </div>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
           
           {/* Images Section */}
           <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700 flex items-center justify-between">
@@ -167,7 +243,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
                </div>
                <div>
                    <h3 className="font-semibold text-slate-200">Images Folder</h3>
-                   <p className="text-xs text-slate-500">{images.length > 0 ? `${images.length} images loaded` : 'Select folder containing images'}</p>
+                   <p className="text-xs text-slate-500">{images.length > 0 ? `${images.length} images loaded (${imagesFolderName})` : 'Select folder containing images'}</p>
                </div>
             </div>
             <button 
@@ -186,7 +262,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
                </div>
                <div>
                    <h3 className="font-semibold text-slate-200">Labels Folder</h3>
-                   <p className="text-xs text-slate-500">{labels.size > 0 ? `${labels.size} labels loaded` : 'Select folder containing YOLO .txt files'}</p>
+                   <p className="text-xs text-slate-500">{labels.size > 0 ? `${labels.size} labels loaded (${labelsFolderName})` : 'Select folder containing YOLO .txt files'}</p>
                </div>
             </div>
             <button 

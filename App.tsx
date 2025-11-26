@@ -23,6 +23,20 @@ const App: React.FC = () => {
   const [isResizing, setIsResizing] = useState(false);
   const [filterClassId, setFilterClassId] = useState<number>(-1); 
   
+  // Persistent Zoom/Display Settings
+  const [zoomSettings, setZoomSettings] = useState<{context: number, mag: number}>(() => {
+     try {
+       const saved = localStorage.getItem('defect_inspector_zoom');
+       return saved ? JSON.parse(saved) : { context: 30, mag: 1 };
+     } catch {
+       return { context: 30, mag: 1 };
+     }
+  });
+
+  useEffect(() => {
+     localStorage.setItem('defect_inspector_zoom', JSON.stringify(zoomSettings));
+  }, [zoomSettings]);
+
   // Modes
   const [isCreating, setIsCreating] = useState(false); // Creation Mode (Key: e)
   const [showBoxFill, setShowBoxFill] = useState(false); // Box Fill Mode (Key: f)
@@ -99,6 +113,18 @@ const App: React.FC = () => {
   const filteredImages = useMemo(() => {
     if (filterClassId === -1) return images;
 
+    // Special Filter: Unlabeled Images (-2)
+    if (filterClassId === -2) {
+        return images.filter(img => {
+            const key = img.name.replace(/\.[^/.]+$/, "");
+            const raw = labelsRaw.get(key);
+            // Considered unlabeled if no entry or empty content
+            if (!raw) return true;
+            const labels = parseYoloString(raw);
+            return labels.length === 0;
+        });
+    }
+
     return images.filter(img => {
        const key = img.name.replace(/\.[^/.]+$/, "");
        const rawContent = labelsRaw.get(key);
@@ -142,7 +168,7 @@ const App: React.FC = () => {
     setShowClassSelector(false);
 
     if (parsed.length > 0) {
-       if (filterClassId !== -1) {
+       if (filterClassId !== -1 && filterClassId !== -2) {
           const matchIdx = parsed.findIndex(l => l.classId === filterClassId);
           if (matchIdx !== -1) {
             setCurrentLabelIdx(matchIdx);
@@ -456,6 +482,7 @@ const App: React.FC = () => {
                     className="bg-slate-800 text-slate-200 text-xs p-1.5 rounded border border-slate-700 focus:ring-1 focus:ring-indigo-500 outline-none max-w-[150px] cursor-pointer"
                 >
                     <option value={-1}>All Defects</option>
+                    <option value={-2}>Unlabeled Images</option>
                     {classes.map((cls, idx) => (
                         <option key={idx} value={idx}>{idx}: {cls}</option>
                     ))}
@@ -511,6 +538,9 @@ const App: React.FC = () => {
             <div className="flex-1 flex flex-col items-center justify-center text-slate-500">
                 <ImageIcon size={48} className="mb-4 opacity-50" />
                 <p className="text-lg font-semibold">No images found</p>
+                {filterClassId === -2 && (
+                    <p className="text-sm mt-2">No unlabeled images in this folder!</p>
+                )}
             </div>
         ) : (
             <>
@@ -549,6 +579,8 @@ const App: React.FC = () => {
                     onDeleteLabel={handleLabelDelete}
                     isCreating={isCreating}
                     onToggleCreateMode={() => setIsCreating(prev => !prev)}
+                    zoomSettings={zoomSettings}
+                    onZoomSettingsChange={setZoomSettings}
                 />
             </>
         )}
