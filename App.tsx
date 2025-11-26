@@ -239,18 +239,21 @@ const App: React.FC = () => {
   };
 
   const handleLabelCreate = (newLabel: YoloLabel) => {
-      // Use the currently selected class ID if available, otherwise 0
-      const defaultClass = currentLabels.length > 0 && currentLabelIdx !== -1 
-          ? currentLabels[currentLabelIdx].classId 
-          : 0;
+      // Use 0 as temporary placeholder, but open selector immediately
+      const defaultClass = 0;
 
       const labelToAdd = { ...newLabel, classId: defaultClass };
       const newLabels = [...currentLabels, labelToAdd];
       
       setCurrentLabels(newLabels);
       setCurrentLabelIdx(newLabels.length - 1); // Select the new label
-      setIsCreating(false); // Turn off create mode after creation
+      setIsCreating(false); // Turn off create mode
       updateRawDataAndSave(newLabels);
+
+      // Immediately open selector to prompt user for class
+      setClassSearchTerm("");
+      setSelectorIndex(0);
+      setShowClassSelector(true);
   };
 
   const handleLabelDelete = () => {
@@ -754,7 +757,7 @@ const App: React.FC = () => {
 
         {/* --- CLASS SELECTOR MODAL --- */}
         {showClassSelector && (
-            <div className="absolute inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center">
+            <div className="absolute inset-0 z-[100] bg-black/25 backdrop-blur-[2px] flex items-center justify-center">
                 <div 
                     ref={classSelectorRef}
                     className="bg-slate-800 border border-slate-600 rounded-xl shadow-2xl w-96 max-h-[80vh] flex flex-col"
