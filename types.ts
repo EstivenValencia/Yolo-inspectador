@@ -10,6 +10,8 @@ export interface YoloLabel {
 export interface FileSystemHandle {
   kind: 'file' | 'directory';
   name: string;
+  queryPermission(descriptor?: { mode?: 'read' | 'readwrite' }): Promise<'granted' | 'denied' | 'prompt'>;
+  requestPermission(descriptor?: { mode?: 'read' | 'readwrite' }): Promise<'granted' | 'denied' | 'prompt'>;
 }
 
 export interface FileSystemFileHandle extends FileSystemHandle {
@@ -22,6 +24,7 @@ export interface FileSystemDirectoryHandle extends FileSystemHandle {
   kind: 'directory';
   values(): AsyncIterableIterator<FileSystemHandle | FileSystemFileHandle | FileSystemDirectoryHandle>;
   getFileHandle(name: string, options?: { create?: boolean }): Promise<FileSystemFileHandle>;
+  getDirectoryHandle(name: string, options?: { create?: boolean }): Promise<FileSystemDirectoryHandle>;
 }
 
 export interface FileSystemWritableFileStream extends WritableStream {
