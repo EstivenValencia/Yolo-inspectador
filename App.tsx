@@ -4,7 +4,7 @@ import { ImageViewer } from './components/ImageViewer';
 import { DetailPanel } from './components/DetailPanel';
 import { ImageAsset, YoloLabel, FileSystemFileHandle, FileSystemDirectoryHandle } from './types';
 import { parseYoloString, serializeYoloString } from './utils/yoloHelper';
-import { ArrowLeft, ArrowRight, Image as ImageIcon, Filter, CheckCircle, Save, PlusSquare, BoxSelect, Home, Search, Keyboard, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Image as ImageIcon, Filter, CheckCircle, Save, PlusSquare, BoxSelect, Home, Search, Keyboard, X, PlusCircle } from 'lucide-react';
 
 const App: React.FC = () => {
   const [isSetup, setIsSetup] = useState(false);
@@ -15,6 +15,7 @@ const App: React.FC = () => {
   const [labelHandles, setLabelHandles] = useState<Map<string, FileSystemFileHandle>>(new Map());
   const [labelsDirHandle, setLabelsDirHandle] = useState<FileSystemDirectoryHandle | null>(null);
   const [classes, setClasses] = useState<string[]>([]);
+  const [classFileHandle, setClassFileHandle] = useState<FileSystemFileHandle | null>(null);
   
   // View State
   const [currentImageIdx, setCurrentImageIdx] = useState(0);
@@ -45,7 +46,9 @@ const App: React.FC = () => {
   // Class Selector Modal State (Key: r)
   const [showClassSelector, setShowClassSelector] = useState(false);
   const [selectorIndex, setSelectorIndex] = useState(0);
+  const [classSearchTerm, setClassSearchTerm] = useState("");
   const classSelectorRef = useRef<HTMLDivElement>(null);
+  const classSearchInputRef = useRef<HTMLInputElement>(null);
 
   // Working State
   const [currentLabels, setCurrentLabels] = useState<YoloLabel[]>([]);
@@ -57,13 +60,15 @@ const App: React.FC = () => {
     loadedLabels: Map<string, string>, 
     loadedLabelHandles: Map<string, FileSystemFileHandle>,
     dirHandle: FileSystemDirectoryHandle | null,
-    loadedClasses: string[]
+    loadedClasses: string[],
+    loadedClassHandle: FileSystemFileHandle | null
   ) => {
     setImages(loadedImages);
     setLabelsRaw(loadedLabels);
     setLabelHandles(loadedLabelHandles);
     setLabelsDirHandle(dirHandle);
     setClasses(loadedClasses);
+    setClassFileHandle(loadedClassHandle);
     setIsSetup(true);
     setCurrentImageIdx(0);
   };
@@ -109,7 +114,7 @@ const App: React.FC = () => {
     setIsResizing(true);
   };
 
-  // --- Filtering Logic ---
+  // --- Filtering Logic for Image Navigation ---
   const filteredImages = useMemo(() => {
     if (filterClassId === -1) return images;
 
@@ -137,6 +142,16 @@ const App: React.FC = () => {
   useEffect(() => {
     setCurrentImageIdx(0);
   }, [filterClassId]);
+
+  // --- Filter Logic for Class Selector ---
+  // Returns array of { index: number, name: string }
+  const filteredClassList = useMemo(() => {
+      const term = classSearchTerm.toLowerCase();
+      if (!term) return classes.map((c, i) => ({ index: i, name: c }));
+      return classes
+        .map((c, i) => ({ index: i, name: c }))
+        .filter(item => item.name.toLowerCase().includes(term));
+  }, [classes, classSearchTerm]);
 
 
   // --- Data Loading ---
@@ -300,14 +315,81 @@ const App: React.FC = () => {
       }
   }
 
+  // --- Dynamic Class Creation Logic ---
+  const handleAddNewClass = async (newClassName: string) => {
+      const trimmed = newClassName.trim();
+      if (!trimmed) return;
+
+      // Update State
+      const newClasses = [...classes, trimmed];
+      setClasses(newClasses);
+
+      // Write to classes.txt
+      if (classFileHandle) {
+          try {
+              const writable = await classFileHandle.createWritable();
+              await writable.write(newClasses.join('\n'));
+              await writable.close();
+          } catch (e) {
+              console.error("Failed to save new class to file", e);
+          }
+      } else {
+         console.warn("No class file handle available to save class");
+      }
+
+      return newClasses.length - 1; // Return the new index
+  };
+
   // --- Keyboard Shortcuts ---
   useEffect(() => {
     if (!isSetup) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+        // If typing in search box, don't trigger standard shortcuts except navigation within modal
+        if (showClassSelector) {
+            if (key === 'escape') {
+                e.preventDefault();
+                setShowClassSelector(false);
+            } else if (key === 'enter') {
+                e.preventDefault();
+                const hasMatches = filteredClassList.length > 0;
+                
+                if (hasMatches) {
+                   // Select existing
+                   const selectedClass = filteredClassList[selectorIndex];
+                   if (selectedClass && currentLabels[currentLabelIdx]) {
+                        handleLabelUpdate({
+                            ...currentLabels[currentLabelIdx],
+                            classId: selectedClass.index
+                        });
+                        setShowClassSelector(false);
+                   }
+                } else if (classSearchTerm.trim().length > 0) {
+                    // Create New
+                    handleAddNewClass(classSearchTerm).then((newId) => {
+                        if (newId !== undefined && currentLabels[currentLabelIdx]) {
+                            handleLabelUpdate({
+                                ...currentLabels[currentLabelIdx],
+                                classId: newId
+                            });
+                        }
+                        setShowClassSelector(false);
+                    });
+                }
+
+            } else if (key === 'arrowup') {
+                e.preventDefault();
+                setSelectorIndex(prev => Math.max(0, prev - 1));
+            } else if (key === 'arrowdown') {
+                e.preventDefault();
+                setSelectorIndex(prev => Math.min(filteredClassList.length - 1, prev + 1));
+            }
+            return;
+        }
+        
         if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
 
-        const key = e.key.toLowerCase();
+        var key = e.key.toLowerCase();
 
         // -----------------------
         // HELP TOGGLE (Global)
@@ -321,31 +403,6 @@ const App: React.FC = () => {
         if (showHelp) {
             if (key === 'escape') setShowHelp(false);
             return; 
-        }
-
-        // -----------------------
-        // MODAL MODE: Class Selector
-        // -----------------------
-        if (showClassSelector) {
-            e.preventDefault(); // Block all other interaction
-            
-            if (key === 'escape' || key === 'r') {
-                setShowClassSelector(false);
-            } else if (key === 'arrowup' || key === 'w') {
-                setSelectorIndex(prev => Math.max(0, prev - 1));
-                // Scroll into view logic could go here if list is long
-            } else if (key === 'arrowdown' || key === 's') {
-                setSelectorIndex(prev => Math.min(classes.length - 1, prev + 1));
-            } else if (key === 'enter') {
-                if (currentLabels[currentLabelIdx]) {
-                    handleLabelUpdate({
-                        ...currentLabels[currentLabelIdx],
-                        classId: selectorIndex
-                    });
-                }
-                setShowClassSelector(false);
-            }
-            return;
         }
 
         // -----------------------
@@ -374,26 +431,27 @@ const App: React.FC = () => {
                 break;
             
             // REASSIGNED SHORTCUTS
-            case 'q': // Delete Label (Was n)
+            case 'q': // Delete Label
             case 'delete':
                 e.preventDefault();
                 handleLabelDelete();
                 break;
-            case 'e': // Mode: Create (Was m)
+            case 'e': // Mode: Create
                 e.preventDefault();
                 setIsCreating(prev => !prev);
                 break;
-            case 'f': // Mode: Box Fill (Was b)
+            case 'f': // Mode: Box Fill
                 e.preventDefault();
                 setShowBoxFill(prev => !prev);
                 break;
             
-            // NEW SHORTCUT
             case 'r': // Rename / Reclassify
                 if (currentLabels.length > 0 && currentLabelIdx !== -1) {
                     e.preventDefault();
-                    setSelectorIndex(currentLabels[currentLabelIdx].classId);
+                    setClassSearchTerm("");
+                    setSelectorIndex(0);
                     setShowClassSelector(true);
+                    // Focus logic is handled in useEffect below
                 }
                 break;
 
@@ -408,15 +466,19 @@ const App: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSetup, nextImage, prevImage, nextLabel, prevLabel, handleLabelDelete, isCreating, showClassSelector, selectorIndex, classes, currentLabels, currentLabelIdx, showHelp]);
+  }, [isSetup, nextImage, prevImage, nextLabel, prevLabel, handleLabelDelete, isCreating, showClassSelector, selectorIndex, classes, currentLabels, currentLabelIdx, showHelp, filteredClassList, classSearchTerm]);
 
-  // Ensure selector index is valid if classes change
+  // Focus Input when selector opens
   useEffect(() => {
-     if (showClassSelector && selectorIndex >= classes.length) {
-         setSelectorIndex(0);
-     }
-  }, [classes, showClassSelector, selectorIndex]);
+    if (showClassSelector && classSearchInputRef.current) {
+        classSearchInputRef.current.focus();
+    }
+  }, [showClassSelector]);
 
+  // Reset index when search changes
+  useEffect(() => {
+     setSelectorIndex(0);
+  }, [classSearchTerm]);
 
   if (!isSetup) {
     return <SetupScreen onComplete={handleSetupComplete} />;
@@ -528,7 +590,7 @@ const App: React.FC = () => {
             {lastSaveStatus === 'error' && (
                 <span className="text-xs text-red-400">Save Error</span>
             )}
-            <span className="text-xs text-slate-600 ml-2">v1.8.0</span>
+            <span className="text-xs text-slate-600 ml-2">v2.0.0</span>
         </div>
       </header>
 
@@ -666,35 +728,67 @@ const App: React.FC = () => {
                     ref={classSelectorRef}
                     className="bg-slate-800 border border-slate-600 rounded-xl shadow-2xl w-96 max-h-[80vh] flex flex-col"
                 >
-                    <div className="p-4 border-b border-slate-700 flex justify-between items-center">
-                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <div className="p-4 border-b border-slate-700">
+                        <h3 className="text-lg font-bold text-white flex items-center gap-2 mb-3">
                             <Search size={20} className="text-indigo-400" /> 
                             Select Class
                         </h3>
-                        <div className="text-xs text-slate-400 flex flex-col items-end">
-                            <span>Navigate: <b>W / S</b></span>
-                            <span>Confirm: <b>Enter</b></span>
+                        <div className="relative">
+                            <input
+                                ref={classSearchInputRef}
+                                type="text"
+                                placeholder="Search or create new..."
+                                value={classSearchTerm}
+                                onChange={(e) => setClassSearchTerm(e.target.value)}
+                                className="w-full bg-slate-900 border border-slate-600 text-white p-2 pl-3 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                            />
                         </div>
                     </div>
                     
-                    <div className="overflow-y-auto flex-1 p-2 space-y-1">
-                        {classes.map((cls, idx) => {
-                            const isActive = idx === selectorIndex;
-                            return (
-                                <div 
-                                    key={idx}
-                                    onClick={() => {
-                                        setSelectorIndex(idx);
-                                        // Optional: Double click to select logic could go here
-                                    }}
-                                    className={`px-4 py-3 rounded-lg cursor-pointer flex items-center justify-between transition-colors ${isActive ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`}
-                                >
-                                    <span className="font-mono text-sm opacity-60 mr-3 w-6 text-right">{idx}</span>
-                                    <span className="flex-1 font-semibold">{cls}</span>
-                                    {isActive && <CheckCircle size={16} />}
+                    <div className="overflow-y-auto flex-1 p-2 space-y-1 min-h-[200px]">
+                        {filteredClassList.length === 0 && classSearchTerm.length > 0 ? (
+                             <div className="flex flex-col items-center justify-center h-full text-slate-400 p-4">
+                                <p className="text-sm mb-2">No existing class found.</p>
+                                <div className="flex items-center gap-2 text-indigo-400 bg-indigo-900/30 px-3 py-2 rounded-lg border border-indigo-500/30">
+                                    <PlusCircle size={16} />
+                                    <span className="text-sm font-bold">Press Enter to create "{classSearchTerm}"</span>
                                 </div>
-                            );
-                        })}
+                             </div>
+                        ) : filteredClassList.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center h-full text-slate-500">
+                                <p>Type to search or add.</p>
+                            </div>
+                        ) : (
+                            filteredClassList.map((item, idx) => {
+                                const isActive = idx === selectorIndex;
+                                return (
+                                    <div 
+                                        key={item.index}
+                                        onClick={() => {
+                                            if (currentLabels[currentLabelIdx]) {
+                                                handleLabelUpdate({
+                                                    ...currentLabels[currentLabelIdx],
+                                                    classId: item.index
+                                                });
+                                                setShowClassSelector(false);
+                                            }
+                                        }}
+                                        className={`px-4 py-3 rounded-lg cursor-pointer flex items-center justify-between transition-colors ${isActive ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <span className="font-mono text-xs opacity-60 w-6 text-right bg-black/20 rounded px-1">{item.index}</span>
+                                            <span className="font-semibold">{item.name}</span>
+                                        </div>
+                                        {isActive && <CheckCircle size={16} />}
+                                    </div>
+                                );
+                            })
+                        )}
+                    </div>
+                    
+                    <div className="p-2 border-t border-slate-700 text-[10px] text-slate-500 flex justify-between px-4">
+                        <span><b>↑/↓</b> to Navigate</span>
+                        <span><b>Enter</b> to Confirm/Create</span>
                     </div>
                 </div>
             </div>

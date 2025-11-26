@@ -17,7 +17,8 @@ interface SetupScreenProps {
     labels: Map<string, string>, 
     labelHandles: Map<string, FileSystemFileHandle>,
     labelsDirHandle: FileSystemDirectoryHandle | null,
-    classes: string[]
+    classes: string[],
+    classFileHandle: FileSystemFileHandle | null
   ) => void;
 }
 
@@ -45,8 +46,6 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
   const [showTutorial, setShowTutorial] = useState(false);
   const [showIntroPrompt, setShowIntroPrompt] = useState(false);
 
-  const hasFileSystemApi = typeof window.showDirectoryPicker === 'function';
-
   // --- Initialization & History ---
   useEffect(() => {
     loadHistory();
@@ -63,7 +62,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
   };
 
   const checkIntroStatus = () => {
-      const skipped = localStorage.getItem('yolo_inspector_skip_intro');
+      const skipped = localStorage.getItem('yolo_inspector_intro_seen');
       if (!skipped) {
           setShowIntroPrompt(true);
       }
@@ -71,7 +70,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
 
   const handleIntroResponse = (wantTutorial: boolean) => {
       setShowIntroPrompt(false);
-      localStorage.setItem('yolo_inspector_skip_intro', 'true');
+      localStorage.setItem('yolo_inspector_intro_seen', 'true');
       if (wantTutorial) {
           setShowTutorial(true);
       }
@@ -95,7 +94,8 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
               });
           }
         } else if (entry.kind === 'directory') {
-          await traverse(entry as FileSystemDirectoryHandle);
+          // Optional: Recursive scan if needed, currently disabled for flat structure per YOLO standard usually
+          // await traverse(entry as FileSystemDirectoryHandle); 
         }
       }
     }
@@ -118,8 +118,6 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
                      newLabels.set(key, text);
                      newHandles.set(key, fileHandle);
                 }
-            } else if (entry.kind === 'directory') {
-                await traverse(entry as FileSystemDirectoryHandle);
             }
         }
     }
@@ -141,12 +139,13 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
         setError(null);
 
         // 1. Re-verify permissions for Image Folder
-        const imgAccess = await verifyPermission(session.imagesHandle, false);
+        // 'true' means readWrite. We might need write permissions to create folders.
+        const imgAccess = await verifyPermission(session.imagesHandle, true); 
         if (!imgAccess) throw new Error("Permission to image folder denied.");
         
         // 2. Load Images
         setImagesDirHandle(session.imagesHandle);
-        setImagesFolderName(session.imagesFolderName);
+        setImagesFolderName(session.imagesHandle.name);
         const loadedImages = await scanDirectoryForImages(session.imagesHandle);
         setImages(loadedImages);
 
@@ -155,36 +154,53 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
         if (!lblAccess) throw new Error("Permission to label folder denied.");
         
         setLabelsDirHandle(session.labelsHandle);
-        setLabelsFolderName(session.labelsFolderName);
+        setLabelsFolderName(session.labelsHandle.name);
         const { newLabels, newHandles } = await scanDirectoryForLabels(session.labelsHandle);
         setLabels(newLabels);
         setLabelHandles(newHandles);
 
         // 4. Classes (Optional)
+        let loadedClasses: string[] = [];
+        let loadedClassHandle: FileSystemFileHandle | null = null;
+
         if (session.classHandle) {
-             const clsAccess = await verifyPermission(session.classHandle, false);
+             const clsAccess = await verifyPermission(session.classHandle, true);
              if (clsAccess) {
-                 const loadedClasses = await parseClassesFile(session.classHandle);
-                 setClasses(loadedClasses);
+                 loadedClasses = await parseClassesFile(session.classHandle);
+                 loadedClassHandle = session.classHandle;
                  setClassFileHandle(session.classHandle);
                  setClassFileName(session.classHandle.name);
              }
         } else {
-            // Try to find classes.txt in the label dir
-            try {
-                const autoHandle = await session.labelsHandle.getFileHandle('classes.txt');
-                const loadedClasses = await parseClassesFile(autoHandle);
-                setClasses(loadedClasses);
-            } catch {
-                setClasses([]);
-            }
+             // Try to find classes.txt in the label dir
+             try {
+                loadedClassHandle = await session.labelsHandle.getFileHandle('classes.txt');
+                loadedClasses = await parseClassesFile(loadedClassHandle);
+                setClassFileHandle(loadedClassHandle);
+                setClassFileName('classes.txt');
+             } catch {
+                // If not found, we will create it in onComplete/Start phase or leave empty
+                loadedClasses = [];
+             }
         }
+        
+        setClasses(loadedClasses);
 
-        // If successful, bump date
-        saveSessionToDB({ ...session, id: Date.now(), date: new Date().toLocaleString() });
+        // Update DB with new timestamp
+        await saveSessionToDB({ ...session, id: Date.now(), date: new Date().toLocaleString() });
+
+        // Trigger complete immediately without user clicking start again
+        onComplete(
+            loadedImages, 
+            newLabels, 
+            newHandles, 
+            session.labelsHandle, 
+            loadedClasses,
+            loadedClassHandle
+        );
 
     } catch (err: any) {
-        setError(err.message || "Failed to restore session. Folders might have moved.");
+        setError(err.message || "Failed to restore session. Folders might have moved or permissions denied.");
     } finally {
         setLoading(false);
     }
@@ -192,7 +208,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
 
   const handleSelectImageFolder = async () => {
     try {
-      const handle = await window.showDirectoryPicker({ id: 'images', mode: 'read' });
+      const handle = await window.showDirectoryPicker({ id: 'images', mode: 'readwrite' });
       setImagesDirHandle(handle);
       setImagesFolderName(handle.name);
       setLoading(true);
@@ -249,22 +265,14 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
     let finalClasses = [...classes];
     let finalLabelHandles = new Map(labelHandles);
     let finalLabelsData = new Map(labels);
+    let finalClassFileHandle = classFileHandle;
 
     try {
         // 1. Logic: If no Label Folder, create/use 'labels' folder inside Image Folder
         if (!finalLabelsHandle) {
             try {
                 // Try to get or create 'labels' directory inside the image directory
-                // Note: This requires readwrite permission on image directory if we are creating it.
-                // We initially asked for 'read' on images. We might need to request upgrade.
-                
-                // If the user didn't give Write access to images, we can't create a subfolder.
-                // We will try to request it.
-                const hasWrite = await verifyPermission(imagesDirHandle, true);
-                if (!hasWrite) {
-                    throw new Error("Write permission needed on Images folder to create Labels folder.");
-                }
-
+                // Note: This requires readwrite permission on image directory.
                 finalLabelsHandle = await imagesDirHandle.getDirectoryHandle('labels', { create: true });
                 setLabelsDirHandle(finalLabelsHandle);
                 
@@ -274,46 +282,32 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
                 finalLabelHandles = scan.newHandles;
 
             } catch (e) {
-                console.warn("Could not create labels subfolder, using root image folder as labels folder (fallback).");
+                console.error("Could not create labels subfolder", e);
+                // Fallback: Use root images folder
                 finalLabelsHandle = imagesDirHandle;
-                // If falling back to root, we already scanned images, but maybe not txt files?
-                // Let's rescan root for txts
                 const scan = await scanDirectoryForLabels(imagesDirHandle);
                 finalLabelsData = scan.newLabels;
                 finalLabelHandles = scan.newHandles;
             }
         }
 
-        // 2. Logic: If no classes loaded, look for classes.txt in the final label dir
-        if (finalClasses.length === 0 && finalLabelsHandle) {
+        // 2. Logic: If no classes loaded, look for classes.txt in the final label dir OR create it
+        if (!finalClassFileHandle) {
              try {
-                 const existingClassHandle = await finalLabelsHandle.getFileHandle('classes.txt');
-                 const parsed = await parseClassesFile(existingClassHandle);
-                 if (parsed.length > 0) {
-                     finalClasses = parsed;
-                     setClassFileHandle(existingClassHandle);
-                 } else {
-                     // Empty file, default to generic
-                     finalClasses = Array.from({ length: 80 }, (_, i) => `Class ${i}`);
-                 }
+                 // Try to open existing
+                 finalClassFileHandle = await finalLabelsHandle.getFileHandle('classes.txt');
+                 finalClasses = await parseClassesFile(finalClassFileHandle);
              } catch (e) {
-                 // File doesn't exist. Create it.
+                 // File doesn't exist. Create it (Empty).
                  try {
-                     const newClassHandle = await finalLabelsHandle.getFileHandle('classes.txt', { create: true });
-                     const writable = await newClassHandle.createWritable();
-                     // Write a default or empty? Let's leave it empty but create it so user can edit.
-                     await writable.write(""); 
-                     await writable.close();
-                     
-                     finalClasses = Array.from({ length: 80 }, (_, i) => `Class ${i}`);
-                     setClassFileHandle(newClassHandle);
+                     finalClassFileHandle = await finalLabelsHandle.getFileHandle('classes.txt', { create: true });
+                     // It's empty, so finalClasses is empty array
+                     finalClasses = [];
                  } catch (createErr) {
                      console.error("Could not create classes.txt", createErr);
-                     finalClasses = Array.from({ length: 80 }, (_, i) => `Class ${i}`);
+                     finalClasses = []; // Start empty
                  }
              }
-        } else if (finalClasses.length === 0) {
-             finalClasses = Array.from({ length: 80 }, (_, i) => `Class ${i}`);
         }
 
         // 3. Save to History (IndexedDB)
@@ -322,14 +316,21 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
             date: new Date().toLocaleString(),
             imagesHandle: imagesDirHandle,
             labelsHandle: finalLabelsHandle!,
-            classHandle: classFileHandle || undefined,
+            classHandle: finalClassFileHandle || undefined,
             imagesFolderName: imagesDirHandle.name,
             labelsFolderName: finalLabelsHandle!.name
         };
         await saveSessionToDB(session);
 
         // 4. Complete
-        onComplete(images, finalLabelsData, finalLabelHandles, finalLabelsHandle, finalClasses);
+        onComplete(
+            images, 
+            finalLabelsData, 
+            finalLabelHandles, 
+            finalLabelsHandle, 
+            finalClasses,
+            finalClassFileHandle
+        );
 
     } catch (err: any) {
         setError(err.message || "An unexpected error occurred during startup.");
@@ -416,7 +417,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
                <div>
                    <h3 className="font-semibold text-slate-200">Labels Folder</h3>
                    <p className="text-xs text-slate-500">
-                       {labels.size > 0 ? `${labels.size} labels loaded (${labelsFolderName})` : 'Optional. Will create "labels" folder if missing.'}
+                       {labels.size > 0 ? `${labels.size} labels loaded (${labelsFolderName})` : 'Optional. Will create "labels" inside Images if missing.'}
                    </p>
                </div>
             </div>
@@ -436,14 +437,14 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete }) => {
                </div>
                <div>
                    <h3 className="font-semibold text-slate-200">Classes File</h3>
-                   <p className="text-xs text-slate-500">{classes.length > 0 ? `${classes.length} classes loaded (${classFileName})` : 'Optional. Will create classes.txt if missing.'}</p>
+                   <p className="text-xs text-slate-500">{classFileHandle ? `Loaded (${classFileName})` : 'Optional. Will create empty classes.txt if missing.'}</p>
                </div>
             </div>
             <button 
                 onClick={handleSelectClassFile}
-                className={`px-4 py-2 rounded text-sm font-bold transition-colors ${classes.length > 0 ? 'bg-amber-600 hover:bg-amber-500 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-300'}`}
+                className={`px-4 py-2 rounded text-sm font-bold transition-colors ${classFileHandle ? 'bg-amber-600 hover:bg-amber-500 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-300'}`}
             >
-                {classes.length > 0 ? 'Change File' : 'Select File'}
+                {classFileHandle ? 'Change File' : 'Select File'}
             </button>
           </div>
 
