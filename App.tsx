@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { SetupScreen } from './components/SetupScreen';
 import { ImageViewer } from './components/ImageViewer';
 import { DetailPanel } from './components/DetailPanel';
 import { ImageAsset, YoloLabel, FileSystemFileHandle, FileSystemDirectoryHandle } from './types';
 import { parseYoloString, serializeYoloString } from './utils/yoloHelper';
-import { ArrowLeft, ArrowRight, Image as ImageIcon, Filter, CheckCircle, Save, PlusSquare, BoxSelect } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Image as ImageIcon, Filter, CheckCircle, Save, PlusSquare, BoxSelect, Home, Search, Keyboard, X } from 'lucide-react';
 
 const App: React.FC = () => {
   const [isSetup, setIsSetup] = useState(false);
@@ -22,9 +22,17 @@ const App: React.FC = () => {
   const [panelWidth, setPanelWidth] = useState(400); 
   const [isResizing, setIsResizing] = useState(false);
   const [filterClassId, setFilterClassId] = useState<number>(-1); 
-  const [isCreating, setIsCreating] = useState(false); // Creation Mode
-  const [showBoxFill, setShowBoxFill] = useState(false); // Box Fill Mode (Key: b)
   
+  // Modes
+  const [isCreating, setIsCreating] = useState(false); // Creation Mode (Key: e)
+  const [showBoxFill, setShowBoxFill] = useState(false); // Box Fill Mode (Key: f)
+  const [showHelp, setShowHelp] = useState(false); // Help Modal (Key: Ctrl+H)
+  
+  // Class Selector Modal State (Key: r)
+  const [showClassSelector, setShowClassSelector] = useState(false);
+  const [selectorIndex, setSelectorIndex] = useState(0);
+  const classSelectorRef = useRef<HTMLDivElement>(null);
+
   // Working State
   const [currentLabels, setCurrentLabels] = useState<YoloLabel[]>([]);
   const [lastSaveStatus, setLastSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -44,6 +52,15 @@ const App: React.FC = () => {
     setClasses(loadedClasses);
     setIsSetup(true);
     setCurrentImageIdx(0);
+  };
+
+  const handleHome = () => {
+      if (window.confirm("Return to Home? Unsaved changes to the current image might be lost if not yet written to disk.")) {
+          setIsSetup(false);
+          setImages([]);
+          setLabelsRaw(new Map());
+          setCurrentLabels([]);
+      }
   };
 
   // Resizing Logic for Panel
@@ -120,8 +137,9 @@ const App: React.FC = () => {
     
     setCurrentLabels(parsed);
     
-    // Reset creation mode when image changes
+    // Reset temporary modes
     setIsCreating(false);
+    setShowClassSelector(false);
 
     if (parsed.length > 0) {
        if (filterClassId !== -1) {
@@ -246,7 +264,6 @@ const App: React.FC = () => {
             // Revert status after 1.5s
             setTimeout(() => setLastSaveStatus('idle'), 1500);
         } else {
-            // No permissions or no directory selected
             console.error("No file handle and no directory handle available.");
             setLastSaveStatus('error');
         }
@@ -264,7 +281,51 @@ const App: React.FC = () => {
     const handleKeyDown = (e: KeyboardEvent) => {
         if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
 
-        switch (e.key.toLowerCase()) {
+        const key = e.key.toLowerCase();
+
+        // -----------------------
+        // HELP TOGGLE (Global)
+        // -----------------------
+        if (e.ctrlKey && key === 'h') {
+          e.preventDefault();
+          setShowHelp(prev => !prev);
+          return;
+        }
+
+        if (showHelp) {
+            if (key === 'escape') setShowHelp(false);
+            return; 
+        }
+
+        // -----------------------
+        // MODAL MODE: Class Selector
+        // -----------------------
+        if (showClassSelector) {
+            e.preventDefault(); // Block all other interaction
+            
+            if (key === 'escape' || key === 'r') {
+                setShowClassSelector(false);
+            } else if (key === 'arrowup' || key === 'w') {
+                setSelectorIndex(prev => Math.max(0, prev - 1));
+                // Scroll into view logic could go here if list is long
+            } else if (key === 'arrowdown' || key === 's') {
+                setSelectorIndex(prev => Math.min(classes.length - 1, prev + 1));
+            } else if (key === 'enter') {
+                if (currentLabels[currentLabelIdx]) {
+                    handleLabelUpdate({
+                        ...currentLabels[currentLabelIdx],
+                        classId: selectorIndex
+                    });
+                }
+                setShowClassSelector(false);
+            }
+            return;
+        }
+
+        // -----------------------
+        // NORMAL MODE
+        // -----------------------
+        switch (key) {
             case 'd': // Next Image
             case 'arrowright':
                 e.preventDefault();
@@ -275,30 +336,41 @@ const App: React.FC = () => {
                 e.preventDefault();
                 prevImage();
                 break;
-            case 'w': // Next Defect
+            case 'w': // Next Defect (Up)
             case 'arrowup':
                 e.preventDefault();
                 nextLabel();
                 break;
-            case 's': // Prev Defect
+            case 's': // Prev Defect (Down)
             case 'arrowdown':
                 e.preventDefault();
                 prevLabel();
                 break;
-            case 'n': // Delete Label
+            
+            // REASSIGNED SHORTCUTS
+            case 'q': // Delete Label (Was n)
             case 'delete':
-            case 'backspace':
                 e.preventDefault();
                 handleLabelDelete();
                 break;
-            case 'm': // Mode: Create
+            case 'e': // Mode: Create (Was m)
                 e.preventDefault();
                 setIsCreating(prev => !prev);
                 break;
-            case 'b': // Mode: Box Fill
+            case 'f': // Mode: Box Fill (Was b)
                 e.preventDefault();
                 setShowBoxFill(prev => !prev);
                 break;
+            
+            // NEW SHORTCUT
+            case 'r': // Rename / Reclassify
+                if (currentLabels.length > 0 && currentLabelIdx !== -1) {
+                    e.preventDefault();
+                    setSelectorIndex(currentLabels[currentLabelIdx].classId);
+                    setShowClassSelector(true);
+                }
+                break;
+
             case 'escape': // Cancel create mode
                 if (isCreating) {
                   e.preventDefault();
@@ -310,7 +382,14 @@ const App: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSetup, nextImage, prevImage, nextLabel, prevLabel, handleLabelDelete, isCreating]);
+  }, [isSetup, nextImage, prevImage, nextLabel, prevLabel, handleLabelDelete, isCreating, showClassSelector, selectorIndex, classes, currentLabels, currentLabelIdx, showHelp]);
+
+  // Ensure selector index is valid if classes change
+  useEffect(() => {
+     if (showClassSelector && selectorIndex >= classes.length) {
+         setSelectorIndex(0);
+     }
+  }, [classes, showClassSelector, selectorIndex]);
 
 
   if (!isSetup) {
@@ -320,19 +399,29 @@ const App: React.FC = () => {
   const currentImage = filteredImages[currentImageIdx];
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-slate-950 overflow-hidden">
+    <div className="h-screen w-screen flex flex-col bg-slate-950 overflow-hidden relative">
       
       {/* Top Header */}
       <header className="h-16 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-6 shrink-0 z-20">
-        <div className="flex items-center gap-3">
-            <div className="bg-indigo-600 p-1.5 rounded text-white">
-                <ImageIcon size={20} />
-            </div>
-            <div>
-                <h1 className="font-bold text-slate-100 text-sm leading-tight">YOLO Inspector</h1>
-                <p className="text-xs text-slate-500">
-                  {currentImage ? currentImage.name : 'No images found'}
-                </p>
+        <div className="flex items-center gap-4">
+            <button 
+                onClick={handleHome}
+                className="bg-slate-800 hover:bg-slate-700 p-2 rounded-lg text-slate-300 border border-slate-700 transition-colors"
+                title="Back to Home / Change Folders"
+            >
+                <Home size={20} />
+            </button>
+            
+            <div className="flex items-center gap-3 border-l border-slate-700 pl-4">
+                <div className="bg-indigo-600 p-1.5 rounded text-white">
+                    <ImageIcon size={20} />
+                </div>
+                <div>
+                    <h1 className="font-bold text-slate-100 text-sm leading-tight">YOLO Inspector</h1>
+                    <p className="text-xs text-slate-500">
+                    {currentImage ? currentImage.name : 'No images found'}
+                    </p>
+                </div>
             </div>
         </div>
 
@@ -341,20 +430,20 @@ const App: React.FC = () => {
              <button 
                 onClick={() => setShowBoxFill(!showBoxFill)}
                 className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-bold transition-all border ${showBoxFill ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'}`}
-                title="Toggle Box Fill (B)"
+                title="Toggle Box Fill (F)"
              >
                 <BoxSelect size={14} />
-                {showBoxFill ? 'Fill On (B)' : 'Fill Off (B)'}
+                {showBoxFill ? 'Fill On (F)' : 'Fill Off (F)'}
              </button>
 
              {/* Mode Indicator Button */}
              <button 
                 onClick={() => setIsCreating(!isCreating)}
                 className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-bold transition-all border ${isCreating ? 'bg-indigo-600 border-indigo-500 text-white animate-pulse' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'}`}
-                title="Toggle Create Mode (M)"
+                title="Toggle Create Mode (E)"
              >
                 <PlusSquare size={14} />
-                {isCreating ? 'CREATING MODE' : 'Create New Box (M)'}
+                {isCreating ? 'CREATING MODE' : 'Create New Box (E)'}
              </button>
 
              {/* Filter Dropdown */}
@@ -392,6 +481,14 @@ const App: React.FC = () => {
                     <ArrowRight size={18} />
                 </button>
             </div>
+            
+            <button 
+                onClick={() => setShowHelp(true)}
+                className="p-2 hover:bg-slate-700 text-slate-400 hover:text-white rounded-lg transition-colors border border-transparent hover:border-slate-600"
+                title="Keyboard Shortcuts (Ctrl+H)"
+            >
+                <Keyboard size={20} />
+            </button>
         </div>
 
         <div className="w-40 flex justify-end items-center gap-2">
@@ -404,12 +501,12 @@ const App: React.FC = () => {
             {lastSaveStatus === 'error' && (
                 <span className="text-xs text-red-400">Save Error</span>
             )}
-            <span className="text-xs text-slate-600 ml-2">v1.6.0</span>
+            <span className="text-xs text-slate-600 ml-2">v1.8.0</span>
         </div>
       </header>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden relative">
         {(filteredImages.length === 0 || !currentImage) ? (
             <div className="flex-1 flex flex-col items-center justify-center text-slate-500">
                 <ImageIcon size={48} className="mb-4 opacity-50" />
@@ -454,6 +551,121 @@ const App: React.FC = () => {
                     onToggleCreateMode={() => setIsCreating(prev => !prev)}
                 />
             </>
+        )}
+
+        {/* --- HELP MODAL --- */}
+        {showHelp && (
+            <div className="absolute inset-0 z-[110] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowHelp(false)}>
+                <div className="bg-slate-800 border border-slate-600 rounded-xl shadow-2xl max-w-2xl w-full p-6" onClick={e => e.stopPropagation()}>
+                    <div className="flex justify-between items-center mb-6">
+                        <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                            <Keyboard className="text-indigo-400" /> Keyboard Shortcuts
+                        </h2>
+                        <button onClick={() => setShowHelp(false)} className="text-slate-400 hover:text-white">
+                            <X size={24} />
+                        </button>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-x-8 gap-y-4">
+                        <div className="space-y-4">
+                            <h3 className="text-sm font-bold text-slate-400 uppercase border-b border-slate-700 pb-2">Navigation</h3>
+                            <div className="flex justify-between items-center text-sm">
+                                <span className="text-slate-300">Previous / Next Image</span>
+                                <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">A / D</span>
+                            </div>
+                             <div className="flex justify-between items-center text-sm">
+                                <span className="text-slate-300">Previous / Next Label</span>
+                                <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">W / S</span>
+                            </div>
+                        </div>
+
+                        <div className="space-y-4">
+                             <h3 className="text-sm font-bold text-slate-400 uppercase border-b border-slate-700 pb-2">Editing</h3>
+                             <div className="flex justify-between items-center text-sm">
+                                <span className="text-slate-300">Create New Box</span>
+                                <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">E</span>
+                            </div>
+                            <div className="flex justify-between items-center text-sm">
+                                <span className="text-slate-300">Delete Selected</span>
+                                <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">Q</span>
+                            </div>
+                             <div className="flex justify-between items-center text-sm">
+                                <span className="text-slate-300">Change Class</span>
+                                <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">R</span>
+                            </div>
+                        </div>
+
+                        <div className="space-y-4">
+                             <h3 className="text-sm font-bold text-slate-400 uppercase border-b border-slate-700 pb-2">View Controls</h3>
+                             <div className="flex justify-between items-center text-sm">
+                                <span className="text-slate-300">Toggle Box Fill</span>
+                                <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">F</span>
+                            </div>
+                             <div className="flex justify-between items-center text-sm">
+                                <span className="text-slate-300">Pan Image</span>
+                                <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">Click & Drag</span>
+                            </div>
+                             <div className="flex justify-between items-center text-sm">
+                                <span className="text-slate-300">Zoom Image</span>
+                                <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">Ctrl + Scroll</span>
+                            </div>
+                        </div>
+                        
+                         <div className="space-y-4">
+                             <h3 className="text-sm font-bold text-slate-400 uppercase border-b border-slate-700 pb-2">General</h3>
+                             <div className="flex justify-between items-center text-sm">
+                                <span className="text-slate-300">Toggle Help</span>
+                                <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">Ctrl + H</span>
+                            </div>
+                             <div className="flex justify-between items-center text-sm">
+                                <span className="text-slate-300">Cancel / Close</span>
+                                <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">Esc</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        )}
+
+        {/* --- CLASS SELECTOR MODAL --- */}
+        {showClassSelector && (
+            <div className="absolute inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center">
+                <div 
+                    ref={classSelectorRef}
+                    className="bg-slate-800 border border-slate-600 rounded-xl shadow-2xl w-96 max-h-[80vh] flex flex-col"
+                >
+                    <div className="p-4 border-b border-slate-700 flex justify-between items-center">
+                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                            <Search size={20} className="text-indigo-400" /> 
+                            Select Class
+                        </h3>
+                        <div className="text-xs text-slate-400 flex flex-col items-end">
+                            <span>Navigate: <b>W / S</b></span>
+                            <span>Confirm: <b>Enter</b></span>
+                        </div>
+                    </div>
+                    
+                    <div className="overflow-y-auto flex-1 p-2 space-y-1">
+                        {classes.map((cls, idx) => {
+                            const isActive = idx === selectorIndex;
+                            return (
+                                <div 
+                                    key={idx}
+                                    onClick={() => {
+                                        setSelectorIndex(idx);
+                                        // Optional: Double click to select logic could go here
+                                    }}
+                                    className={`px-4 py-3 rounded-lg cursor-pointer flex items-center justify-between transition-colors ${isActive ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`}
+                                >
+                                    <span className="font-mono text-sm opacity-60 mr-3 w-6 text-right">{idx}</span>
+                                    <span className="flex-1 font-semibold">{cls}</span>
+                                    {isActive && <CheckCircle size={16} />}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            </div>
         )}
       </div>
     </div>

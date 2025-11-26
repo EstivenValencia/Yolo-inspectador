@@ -36,8 +36,10 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   const zoomContainerRef = useRef<HTMLDivElement>(null);
   const [imgElement, setImgElement] = useState<HTMLImageElement | null>(null);
   
-  // Context Padding (0-100%)
-  const [contextPadding, setContextPadding] = useState(20);
+  // Context Padding (Scale Multiplier)
+  // 0 = Tight crop (approx 1.2x size)
+  // 100 = Wide crop (approx 5x size)
+  const [contextPadding, setContextPadding] = useState(30);
   
   // Zoom & Pan for Right Panel
   const [zoom, setZoom] = useState(1);
@@ -66,43 +68,51 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     const ctx = canvasRef.current.getContext('2d');
     if (!ctx) return;
 
-    // Calculate crop coordinates based on Interpolation (0% = Label, 100% = Full Image)
     const imgW = imgElement.naturalWidth;
     const imgH = imgElement.naturalHeight;
     
-    // Convert Label Center/Width to Top/Left/Right/Bottom (0-1 coords)
-    const lblLeft = currentLabel.x - currentLabel.w / 2;
-    const lblRight = currentLabel.x + currentLabel.w / 2;
-    const lblTop = currentLabel.y - currentLabel.h / 2;
-    const lblBottom = currentLabel.y + currentLabel.h / 2;
+    // NEW LOGIC: Crop is relative to the defect size
+    // Calculate expansion factor based on slider (0-100) maps to (1.2x - 6.0x) size
+    // This ensures small defects are ZOOMED IN, not lost in a large crop
+    const expansionFactor = 1.2 + (contextPadding / 100) * 4.0; 
 
-    const imgLeft = 0; const imgRight = 1; const imgTop = 0; const imgBottom = 1;
+    // Calculate crop dimensions relative to label size
+    const cropW = currentLabel.w * expansionFactor;
+    const cropH = currentLabel.h * expansionFactor;
 
-    const t = contextPadding / 100;
+    // Calculate crop boundaries (0-1 coordinates)
+    // Clamp to image boundaries
+    const cLeft = Math.max(0, currentLabel.x - cropW / 2);
+    const cRight = Math.min(1, currentLabel.x + cropW / 2);
+    const cTop = Math.max(0, currentLabel.y - cropH / 2);
+    const cBottom = Math.min(1, currentLabel.y + cropH / 2);
 
-    const cLeft = lblLeft + (imgLeft - lblLeft) * t;
-    const cRight = lblRight + (imgRight - lblRight) * t;
-    const cTop = lblTop + (imgTop - lblTop) * t;
-    const cBottom = lblBottom + (imgBottom - lblBottom) * t;
+    // Convert to pixels
+    const pxLeft = cLeft * imgW;
+    const pxTop = cTop * imgH;
+    const pxWidth = (cRight - cLeft) * imgW;
+    const pxHeight = (cBottom - cTop) * imgH;
 
-    const pxLeft = Math.max(0, cLeft * imgW);
-    const pxTop = Math.max(0, cTop * imgH);
-    const pxWidth = Math.min(imgW, (cRight * imgW) - pxLeft);
-    const pxHeight = Math.min(imgH, (cBottom * imgH) - pxTop);
-
+    // Set canvas size to the Pixel dimensions of the crop
+    // This forces the browser to scale this UP to fit the CSS container, creating the "Zoom" effect
     canvasRef.current.width = Math.max(1, pxWidth);
     canvasRef.current.height = Math.max(1, pxHeight);
 
+    // Draw image portion
     ctx.clearRect(0, 0, pxWidth, pxHeight);
+    // Draw source (pxLeft, pxTop, pxWidth, pxHeight) to destination (0, 0, pxWidth, pxHeight)
     ctx.drawImage(imgElement, pxLeft, pxTop, pxWidth, pxHeight, 0, 0, pxWidth, pxHeight);
 
+    // Draw the Box on the canvas
+    // We need to translate the global coordinates to the crop-local coordinates
     const boxX = (currentLabel.x * imgW) - (currentLabel.w * imgW) / 2 - pxLeft;
     const boxY = (currentLabel.y * imgH) - (currentLabel.h * imgH) / 2 - pxTop;
     const boxW = currentLabel.w * imgW;
     const boxH = currentLabel.h * imgH;
 
     ctx.strokeStyle = getColor(currentLabel.classId);
-    ctx.lineWidth = Math.max(2, pxWidth / 150); 
+    // Dynamic line width relative to crop size so it's always visible but not overwhelming
+    ctx.lineWidth = Math.max(2, Math.min(pxWidth, pxHeight) / 50); 
     ctx.strokeRect(boxX, boxY, boxW, boxH);
 
   }, [currentLabel, imgElement, contextPadding]); 
@@ -172,7 +182,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
            className={`flex items-center gap-2 px-6 py-3 rounded-lg font-bold transition-all shadow-lg ${isCreating ? 'bg-indigo-600 text-white shadow-indigo-500/30' : 'bg-slate-700 hover:bg-slate-600 text-slate-200'}`}
         >
              <Plus size={20} />
-             {isCreating ? 'Draw on Image' : 'Start Adding Labels'}
+             {isCreating ? 'Draw on Image' : 'Start Adding Labels (E)'}
         </button>
       </div>
     );
@@ -192,7 +202,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                <button 
                   onClick={onToggleCreateMode}
                   className={`p-1 rounded transition-colors ${isCreating ? 'bg-indigo-600 text-white' : 'hover:bg-slate-700 text-slate-400'}`}
-                  title="Add New Label"
+                  title="Add New Label (E)"
                >
                    <Plus size={16} />
                </button>
@@ -212,6 +222,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                 value={contextPadding} 
                 onChange={(e) => setContextPadding(parseInt(e.target.value))}
                 className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                title="Adjust Zoom Level around the defect"
              />
              <span className="text-[10px] w-8 text-right text-slate-400">{contextPadding}%</span>
         </div>
@@ -223,12 +234,13 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
             className={`w-full aspect-video bg-black/40 rounded-lg border border-slate-600 flex items-center justify-center overflow-hidden relative ${isPanning ? 'cursor-grabbing' : 'cursor-grab'}`}
         >
           <div 
-             className="relative transition-transform duration-75 ease-out"
+             className="relative transition-transform duration-75 ease-out w-full h-full flex items-center justify-center"
              style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
           >
             <canvas 
                 ref={canvasRef} 
-                className="max-w-full max-h-full object-contain pointer-events-none"
+                className="max-w-full max-h-full object-contain pointer-events-none image-pixelated"
+                style={{ imageRendering: 'pixelated' }} // Ensures small defects look sharp when zoomed up
             />
           </div>
           
@@ -241,7 +253,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
           <button 
             onClick={onPrevLabel}
             className="flex-1 flex items-center justify-center gap-1 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded transition-colors text-sm"
-            title="Previous Defect"
+            title="Previous Defect (S)"
           >
             <ChevronLeft size={16} />
           </button>
@@ -249,7 +261,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
           <button
              onClick={onDeleteLabel}
              className="flex items-center justify-center bg-red-900/40 hover:bg-red-600 text-red-200 hover:text-white px-4 rounded transition-colors border border-red-900/50"
-             title="Delete current label (Backspace)"
+             title="Delete current label (Q)"
           >
             <Trash2 size={16} />
           </button>
@@ -257,7 +269,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
           <button 
             onClick={onNextLabel}
             className="flex-1 flex items-center justify-center gap-1 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded transition-colors text-sm"
-            title="Next Defect"
+            title="Next Defect (W)"
           >
             <ChevronRight size={16} />
           </button>
@@ -290,6 +302,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
               style={{ backgroundColor: getColor(currentLabel?.classId || 0) }}
             />
           </div>
+          <p className="text-[10px] text-slate-500 mt-2 text-right">Press <b>R</b> to quick select</p>
         </div>
 
         {/* Coordinates */}
