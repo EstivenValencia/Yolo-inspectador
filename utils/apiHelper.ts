@@ -5,6 +5,11 @@ export interface BackendConfig {
   apiUrl: string;
   confidenceThreshold: number;
   iouThreshold: number;
+  // SAHI Parameters
+  sliceHeight: number;
+  sliceWidth: number;
+  overlapHeightRatio: number;
+  overlapWidthRatio: number;
 }
 
 export const checkBackendHealth = async (url: string): Promise<boolean> => {
@@ -22,8 +27,16 @@ export const detectObjects = async (
 ): Promise<YoloLabel[]> => {
   const formData = new FormData();
   formData.append('image', imageFile);
+  
+  // Map frontend config names to backend expected names
   formData.append('confidence', config.confidenceThreshold.toString());
   formData.append('iou', config.iouThreshold.toString());
+  
+  // SAHI Params
+  formData.append('slice_height', config.sliceHeight.toString());
+  formData.append('slice_width', config.sliceWidth.toString());
+  formData.append('overlap_height', config.overlapHeightRatio.toString());
+  formData.append('overlap_width', config.overlapWidthRatio.toString());
 
   try {
     const response = await fetch(`${config.apiUrl}/predict`, {
@@ -32,12 +45,12 @@ export const detectObjects = async (
     });
 
     if (!response.ok) {
-      throw new Error(`Server error: ${response.statusText}`);
+      throw new Error(`Server error: ${response.status} ${response.statusText}`);
     }
 
     const data = await response.json();
     
-    // Validate and cast data
+    // Validar y castear datos
     if (Array.isArray(data)) {
         return data.map((item: any) => ({
             classId: Number(item.classId),

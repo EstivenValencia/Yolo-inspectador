@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { SetupScreen } from './components/SetupScreen';
 import { ImageViewer } from './components/ImageViewer';
@@ -51,7 +52,11 @@ const App: React.FC = () => {
   const [inferenceConfig, setInferenceConfig] = useState<BackendConfig>({
       apiUrl: 'http://localhost:5000',
       confidenceThreshold: 0.25,
-      iouThreshold: 0.45
+      iouThreshold: 0.45,
+      sliceWidth: 640,
+      sliceHeight: 640,
+      overlapWidthRatio: 0.0,
+      overlapHeightRatio: 0.0
   });
   const [isInferencing, setIsInferencing] = useState(false);
   const [backendConnected, setBackendConnected] = useState(false);

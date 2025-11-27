@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Cpu, X, Server, AlertCircle, CheckCircle } from 'lucide-react';
+import { Cpu, X, CheckCircle, AlertCircle } from 'lucide-react';
 import { BackendConfig, checkBackendHealth } from '../utils/apiHelper';
 
 interface ModelSettingsProps {
@@ -33,10 +33,10 @@ export const ModelSettings: React.FC<ModelSettingsProps> = ({
 
   return (
     <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-slate-800 border border-slate-600 rounded-xl shadow-2xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}>
+      <div className="bg-slate-800 border border-slate-600 rounded-xl shadow-2xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-6">
             <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                <Cpu className="text-indigo-400" /> Python Backend Settings
+                <Cpu className="text-indigo-400" /> SAHI Inference Settings
             </h2>
             <button onClick={onClose} className="text-slate-400 hover:text-white">
                 <X size={24} />
@@ -71,15 +71,15 @@ export const ModelSettings: React.FC<ModelSettingsProps> = ({
                 )}
                 {testResult === 'fail' && (
                     <div className="mt-2 text-red-400 text-xs flex items-center gap-1">
-                        <AlertCircle size={12} /> Connection Failed. Check if python script is running.
+                        <AlertCircle size={12} /> Connection Failed. Check console.
                     </div>
                 )}
             </div>
 
-            {/* Thresholds */}
+            {/* Main Thresholds */}
             <div className="grid grid-cols-2 gap-4">
                 <div>
-                    <label className="block text-xs font-bold text-slate-400 mb-1 uppercase">Confidence Threshold</label>
+                    <label className="block text-xs font-bold text-slate-400 mb-1 uppercase">Confidence</label>
                     <input 
                         type="number" 
                         step="0.05"
@@ -91,7 +91,7 @@ export const ModelSettings: React.FC<ModelSettingsProps> = ({
                     />
                 </div>
                 <div>
-                    <label className="block text-xs font-bold text-slate-400 mb-1 uppercase">NMS IoU Threshold</label>
+                    <label className="block text-xs font-bold text-slate-400 mb-1 uppercase">IoU Threshold</label>
                      <input 
                         type="number" 
                         step="0.05"
@@ -102,6 +102,61 @@ export const ModelSettings: React.FC<ModelSettingsProps> = ({
                         className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white focus:ring-1 focus:ring-indigo-500 outline-none"
                     />
                 </div>
+            </div>
+
+            <hr className="border-slate-700" />
+
+            {/* SAHI Parameters */}
+            <div>
+                 <h3 className="text-sm font-bold text-indigo-300 mb-3">SAHI Slicing Parameters</h3>
+                 <div className="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label className="block text-xs font-bold text-slate-400 mb-1">Slice Width (px)</label>
+                        <input 
+                            type="number" 
+                            step="32"
+                            min="32"
+                            value={config.sliceWidth}
+                            onChange={(e) => onConfigChange({...config, sliceWidth: parseInt(e.target.value)})}
+                            className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white focus:ring-1 focus:ring-indigo-500 outline-none"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-slate-400 mb-1">Slice Height (px)</label>
+                        <input 
+                            type="number" 
+                            step="32"
+                            min="32"
+                            value={config.sliceHeight}
+                            onChange={(e) => onConfigChange({...config, sliceHeight: parseInt(e.target.value)})}
+                            className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white focus:ring-1 focus:ring-indigo-500 outline-none"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-slate-400 mb-1">Overlap Width Ratio</label>
+                        <input 
+                            type="number" 
+                            step="0.05"
+                            min="0"
+                            max="0.5"
+                            value={config.overlapWidthRatio}
+                            onChange={(e) => onConfigChange({...config, overlapWidthRatio: parseFloat(e.target.value)})}
+                            className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white focus:ring-1 focus:ring-indigo-500 outline-none"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-slate-400 mb-1">Overlap Height Ratio</label>
+                        <input 
+                            type="number" 
+                            step="0.05"
+                            min="0"
+                            max="0.5"
+                            value={config.overlapHeightRatio}
+                            onChange={(e) => onConfigChange({...config, overlapHeightRatio: parseFloat(e.target.value)})}
+                            className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white focus:ring-1 focus:ring-indigo-500 outline-none"
+                        />
+                    </div>
+                 </div>
             </div>
 
             <div className="bg-slate-900/50 p-3 rounded text-xs text-slate-400">
