@@ -34,9 +34,28 @@ const App: React.FC = () => {
      }
   });
 
+  // Persistent Class Usage Stats (For sorting)
+  const [classUsage, setClassUsage] = useState<Record<string, number>>(() => {
+      try {
+          const saved = localStorage.getItem('yolo_class_usage');
+          return saved ? JSON.parse(saved) : {};
+      } catch {
+          return {};
+      }
+  });
+
   useEffect(() => {
      localStorage.setItem('defect_inspector_zoom', JSON.stringify(zoomSettings));
   }, [zoomSettings]);
+
+  // Helper to increment usage
+  const recordClassUsage = (className: string) => {
+      setClassUsage(prev => {
+          const next = { ...prev, [className]: (prev[className] || 0) + 1 };
+          localStorage.setItem('yolo_class_usage', JSON.stringify(next));
+          return next;
+      });
+  };
 
   // Modes
   const [isCreating, setIsCreating] = useState(false); // Creation Mode (Key: e)
@@ -145,15 +164,28 @@ const App: React.FC = () => {
 
   // --- Filter Logic for Class Selector ---
   // Returns array of { index: number, name: string }
+  // SORTED BY USAGE FREQUENCY
   const filteredClassList = useMemo(() => {
+      // 1. Map to rich objects
+      const mapped = classes.map((c, i) => ({ 
+          index: i, 
+          name: c, 
+          count: classUsage[c] || 0 
+      }));
+
+      // 2. Sort by Usage Count (Descending)
+      // If counts are equal, keep original index order (stability)
+      mapped.sort((a, b) => {
+          if (b.count !== a.count) return b.count - a.count;
+          return a.index - b.index;
+      });
+
       const term = classSearchTerm.toLowerCase();
-      if (!term) return classes.map((c, i) => ({ index: i, name: c }));
+      if (!term) return mapped;
       
-      // Filter list: only show classes that include the term
-      return classes
-        .map((c, i) => ({ index: i, name: c }))
-        .filter(item => item.name.toLowerCase().includes(term));
-  }, [classes, classSearchTerm]);
+      // 3. Filter list by search term
+      return mapped.filter(item => item.name.toLowerCase().includes(term));
+  }, [classes, classSearchTerm, classUsage]);
 
 
   // --- Data Loading ---
@@ -234,6 +266,13 @@ const App: React.FC = () => {
 
     const newLabels = [...currentLabels];
     if (targetIdx >= 0 && targetIdx < newLabels.length) {
+        // Record Usage if class ID changed
+        const oldClassId = newLabels[targetIdx].classId;
+        if (oldClassId !== updatedLabel.classId) {
+            const className = classes[updatedLabel.classId];
+            if (className) recordClassUsage(className);
+        }
+
         newLabels[targetIdx] = updatedLabel;
         setCurrentLabels(newLabels);
         updateRawDataAndSave(newLabels);
@@ -253,6 +292,7 @@ const App: React.FC = () => {
       updateRawDataAndSave(newLabels);
 
       // Immediately open selector to prompt user for class
+      // Because filteredClassList is sorted by usage, the most used one will be at index 0
       setClassSearchTerm("");
       setSelectorIndex(0);
       setShowClassSelector(true);
@@ -344,6 +384,9 @@ const App: React.FC = () => {
          console.warn("No class file handle available to save class");
       }
 
+      // Record initial usage so it pops up next time
+      recordClassUsage(trimmed);
+
       return newClasses.length - 1; // Return the new index
   };
 
@@ -377,8 +420,9 @@ const App: React.FC = () => {
                         setShowClassSelector(false);
                    }
                 } else if (hasMatches && classSearchTerm.length < 3) {
-                   // If purely searching (short term) and list has items, assume selection
+                   // If purely searching (short term) OR empty search (Enter on most frequent)
                    // e.g. "ba" -> select first item "basura"
+                   // e.g. "" -> select first item (Highest Usage)
                    const selectedClass = filteredClassList[selectorIndex];
                    if (selectedClass && currentLabels[currentLabelIdx]) {
                         handleLabelUpdate({
@@ -389,9 +433,6 @@ const App: React.FC = () => {
                    }
                 } else if (classSearchTerm.trim().length > 0) {
                     // Create New because specific term was typed and no exact match
-                    // This handles: "barrido" (list empty) -> create
-                    // This handles: "Cart" (list has "Car", but "Cart" != "Car") -> create
-                    
                     handleAddNewClass(classSearchTerm).then((newId) => {
                         if (newId !== undefined && currentLabels[currentLabelIdx]) {
                             handleLabelUpdate({
@@ -402,7 +443,7 @@ const App: React.FC = () => {
                         setShowClassSelector(false);
                     });
                 } else if (hasMatches) {
-                     // Fallback for empty search term + Enter -> Select currently highlighted
+                     // Fallback for empty search term + Enter -> Select currently highlighted (Most frequent)
                      const selectedClass = filteredClassList[selectorIndex];
                      if (selectedClass && currentLabels[currentLabelIdx]) {
                         handleLabelUpdate({
@@ -485,7 +526,7 @@ const App: React.FC = () => {
                 if (currentLabels.length > 0 && currentLabelIdx !== -1) {
                     e.preventDefault();
                     setClassSearchTerm("");
-                    setSelectorIndex(0);
+                    setSelectorIndex(0); // This will default to the most frequent class (index 0 of sorted list)
                     setShowClassSelector(true);
                     // Focus logic is handled in useEffect below
                 }
@@ -779,6 +820,9 @@ const App: React.FC = () => {
                                 className="w-full bg-slate-900 border border-slate-600 text-white p-2 pl-3 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
                             />
                         </div>
+                        <p className="text-[10px] text-slate-400 mt-2">
+                           Ordered by frequency. Top item selected by default.
+                        </p>
                     </div>
                     
                     <div className="overflow-y-auto flex-1 p-2 space-y-1 min-h-[200px]">
@@ -826,6 +870,7 @@ const App: React.FC = () => {
                                         <div className="flex items-center gap-3">
                                             <span className="font-mono text-xs opacity-60 w-6 text-right bg-black/20 rounded px-1">{item.index}</span>
                                             <span className="font-semibold">{item.name}</span>
+                                            {item.count > 0 && <span className="text-[10px] bg-slate-600 px-1.5 rounded text-slate-300">{item.count}</span>}
                                         </div>
                                         {isActive && <CheckCircle size={16} />}
                                     </div>
