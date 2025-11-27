@@ -8,7 +8,7 @@ import { GridView } from './components/GridView';
 import { ImageAsset, YoloLabel, FileSystemFileHandle, FileSystemDirectoryHandle } from './types';
 import { parseYoloString, serializeYoloString } from './utils/yoloHelper';
 import { detectObjects, BackendConfig, checkBackendHealth } from './utils/apiHelper';
-import { ArrowLeft, ArrowRight, Image as ImageIcon, Filter, CheckCircle, Save, PlusSquare, BoxSelect, Home, Search, Keyboard, X, PlusCircle, Wifi, WifiOff, FileCheck, PlayCircle, StopCircle, Loader2, Wrench, Eye, EyeOff, ChevronDown, Grid, Square, Settings, LayoutGrid } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Image as ImageIcon, Filter, CheckCircle, Save, PlusSquare, BoxSelect, Home, Search, Keyboard, X, PlusCircle, Wifi, WifiOff, FileCheck, PlayCircle, StopCircle, Loader2, Wrench, Eye, EyeOff, ChevronDown, Grid, Square, Settings, LayoutGrid, Zap, ZapOff, Sliders, MonitorPlay, ZoomIn, Clock } from 'lucide-react';
 
 const App: React.FC = () => {
   const [isSetup, setIsSetup] = useState(false);
@@ -33,10 +33,20 @@ const App: React.FC = () => {
   
   // View Mode & Grid Config
   const [viewMode, setViewMode] = useState<'single' | 'grid'>('single');
-  const [gridConfig, setGridConfig] = useState({ rows: 3, cols: 4 });
+  const [gridMode, setGridMode] = useState<'normal' | 'zoom'>('normal'); // New Grid Mode
+  const [gridConfig, setGridConfig] = useState({ 
+      rows: 3, 
+      cols: 4,
+      // Zoom Grid Settings
+      context: 30, // %
+      magnification: 1,
+      interval: 2000, // ms
+      isPlaying: true
+  });
   const [showGridConfig, setShowGridConfig] = useState(false);
+  const [gridConfigTab, setGridConfigTab] = useState<'layout' | 'zoom' | 'playback'>('layout');
   
-  // Persistent Zoom/Display Settings
+  // Persistent Zoom/Display Settings (Single View)
   const [zoomSettings, setZoomSettings] = useState<{context: number, mag: number}>(() => {
      try {
        const saved = localStorage.getItem('defect_inspector_zoom');
@@ -67,10 +77,15 @@ const App: React.FC = () => {
       overlapWidthRatio: 0.0,
       overlapHeightRatio: 0.0
   });
-  const [isInferencing, setIsInferencing] = useState(false);
-  const [isBatchRunning, setIsBatchRunning] = useState(false);
+  
+  // Batch / Background Inference State
+  const [isBatchActive, setIsBatchActive] = useState(false);
+  const [batchSettings, setBatchSettings] = useState({ lookahead: 50, delay: 100 });
+  const [isBackgroundProcessing, setIsBackgroundProcessing] = useState(false);
+  const [showBatchSettings, setShowBatchSettings] = useState(false);
+
+  const [isInferencing, setIsInferencing] = useState(false); // Single inference loading state
   const [backendConnected, setBackendConnected] = useState(false);
-  const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
      localStorage.setItem('defect_inspector_zoom', JSON.stringify(zoomSettings));
@@ -81,11 +96,14 @@ const App: React.FC = () => {
       const check = async () => {
           const isUp = await checkBackendHealth(inferenceConfig.apiUrl);
           setBackendConnected(isUp);
+          if (!isUp && isBatchActive) {
+             setIsBatchActive(false); // Auto-stop batch if connection lost
+          }
       };
       check();
       const interval = setInterval(check, 5000);
       return () => clearInterval(interval);
-  }, [inferenceConfig.apiUrl]);
+  }, [inferenceConfig.apiUrl, isBatchActive]);
 
   // Helper to increment usage
   const recordClassUsage = (className: string) => {
@@ -144,6 +162,7 @@ const App: React.FC = () => {
           setLabelsRaw(new Map());
           setPredictionsCache(new Map());
           setCurrentLabels([]);
+          setIsBatchActive(false);
       }
   };
 
@@ -204,12 +223,10 @@ const App: React.FC = () => {
     });
   }, [images, labelsRaw, filterClassId]);
 
-  // Stop batch processing if filter changes
+  // Reset index when filter changes
   useEffect(() => {
-    if (isBatchRunning) {
-        stopBatchInference();
-    }
     setCurrentImageIdx(0);
+    // Note: We do NOT stop batch inference here. The background worker should adapt to the new list.
   }, [filterClassId]);
 
   // --- Filter Logic for Class Selector ---
@@ -375,7 +392,7 @@ const App: React.FC = () => {
       setShowClassSelector(true);
   };
 
-  // --- SINGLE INFERENCE ---
+  // --- SINGLE INFERENCE (Manual Trigger) ---
   const handleRunInference = async () => {
     const currentImg = filteredImages[currentImageIdx];
     
@@ -393,17 +410,16 @@ const App: React.FC = () => {
     try {
         const predictions = await detectObjects(currentImg.file, inferenceConfig);
 
-        if (predictions.length > 0) {
-            // 1. Update Cache
-            const key = currentImg.name.replace(/\.[^/.]+$/, "");
-            setPredictionsCache(prev => {
-                const newMap = new Map(prev);
-                newMap.set(key, predictions);
-                return newMap;
-            });
-            // The useEffect will pick this up and re-render
-        } else {
-           // Optional: Notification for no detection
+        const key = currentImg.name.replace(/\.[^/.]+$/, "");
+        setPredictionsCache(prev => {
+            const newMap = new Map(prev);
+            // Always set, even if empty, so we know it was processed
+            newMap.set(key, predictions);
+            return newMap;
+        });
+
+        if (predictions.length === 0) {
+            // Optional: Small toast saying "No objects detected"
         }
     } catch (e) {
         console.error("Inference failed", e);
@@ -413,77 +429,72 @@ const App: React.FC = () => {
     }
   };
 
-  // --- BATCH INFERENCE ---
-  const stopBatchInference = () => {
-    if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-        abortControllerRef.current = null;
+  // --- BACKGROUND BATCH WORKER ---
+  useEffect(() => {
+    // Conditions to run the worker
+    if (!isBatchActive || !backendConnected || isBackgroundProcessing || filteredImages.length === 0) return;
+
+    // 1. Find the next image in the "Lookahead Window" that hasn't been processed yet
+    const findNextCandidate = () => {
+        // Start from current position, scan forward up to 'lookahead' amount
+        for (let i = 0; i < batchSettings.lookahead; i++) {
+            const targetIdx = currentImageIdx + i;
+            // Stop if we reach end of filtered list
+            if (targetIdx >= filteredImages.length) break;
+
+            const img = filteredImages[targetIdx];
+            const key = img.name.replace(/\.[^/.]+$/, "");
+            
+            // Check cache. If key exists (even if empty array), it's processed.
+            if (!predictionsCache.has(key)) {
+                return { idx: targetIdx, img };
+            }
+        }
+        return null;
+    };
+
+    const candidate = findNextCandidate();
+
+    if (candidate) {
+        // Lock the worker
+        setIsBackgroundProcessing(true);
+        const { img } = candidate;
+
+        const processImage = async () => {
+             // Artificial Delay to prevent UI freeze and network saturation
+             await new Promise(r => setTimeout(r, batchSettings.delay));
+             
+             // Double check if still active
+             if (!isBatchActive) {
+                 setIsBackgroundProcessing(false);
+                 return;
+             }
+
+             if (img.file) {
+                 try {
+                     const predictions = await detectObjects(img.file, inferenceConfig);
+                     const key = img.name.replace(/\.[^/.]+$/, "");
+                     
+                     // Update Cache
+                     setPredictionsCache(prev => {
+                         const newMap = new Map(prev);
+                         newMap.set(key, predictions); // Stores [] if empty
+                         return newMap;
+                     });
+                 } catch (e) {
+                     console.warn(`Bg inference failed for ${img.name}`, e);
+                     // Optional: Mark as error or ignore to retry? 
+                     // For now we don't set cache, so it might retry.
+                 }
+             }
+             // Unlock
+             setIsBackgroundProcessing(false);
+        };
+        processImage();
     }
-    setIsBatchRunning(false);
-  };
+  }, [isBatchActive, backendConnected, isBackgroundProcessing, currentImageIdx, filteredImages, batchSettings, predictionsCache, inferenceConfig]);
 
-  const handleBatchInference = async () => {
-      if (!backendConnected) {
-          setShowModelSettings(true);
-          return;
-      }
-      if (isBatchRunning) return;
 
-      setIsBatchRunning(true);
-      abortControllerRef.current = new AbortController();
-      const signal = abortControllerRef.current.signal;
-
-      const BATCH_SIZE = 50;
-      let processedCount = 0;
-      let startIdx = currentImageIdx;
-
-      // Ensure we don't go out of bounds
-      if (startIdx >= filteredImages.length) startIdx = 0;
-
-      try {
-          // Loop next 50 images
-          for (let i = 0; i < BATCH_SIZE; i++) {
-              if (signal.aborted) break;
-
-              const targetIdx = startIdx + i;
-              if (targetIdx >= filteredImages.length) break; // End of list
-
-              const img = filteredImages[targetIdx];
-              
-              // Move view to show progress (User Experience)
-              setCurrentImageIdx(targetIdx);
-
-              if (img && img.file) {
-                   try {
-                       const predictions = await detectObjects(img.file, inferenceConfig);
-                       
-                       if (predictions.length > 0) {
-                           // Update cache for this image
-                           const key = img.name.replace(/\.[^/.]+$/, "");
-                           setPredictionsCache(prev => {
-                               const newMap = new Map(prev);
-                               newMap.set(key, predictions);
-                               return newMap;
-                           });
-                       }
-                   } catch (err) {
-                       console.warn(`Failed to infer image ${img.name}`, err);
-                   }
-              }
-
-              processedCount++;
-              // Small delay to allow UI to render frame and not freeze browser
-              await new Promise(resolve => setTimeout(resolve, 50));
-          }
-
-      } catch (e) {
-          console.error("Batch process error", e);
-      } finally {
-          setIsBatchRunning(false);
-          abortControllerRef.current = null;
-      }
-  };
-  
   const handleAcceptPredictions = () => {
       // Logic: Take all labels marked as 'isPredicted', strip the flag, and save to disk.
       // Also clear them from the cache so they don't double up.
@@ -638,7 +649,7 @@ const App: React.FC = () => {
     if (!isSetup) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-        if (showClassSelector || showGridConfig) {
+        if (showClassSelector || showGridConfig || showBatchSettings) {
             if (e.key === 'Escape') {
                 e.preventDefault();
                 if (pendingLabelIndex !== null) {
@@ -646,6 +657,7 @@ const App: React.FC = () => {
                 }
                 setShowClassSelector(false);
                 setShowGridConfig(false);
+                setShowBatchSettings(false);
             } else if (e.key === 'Enter' && showClassSelector) {
                 // ... (Existing Enter logic for class selector) ...
                 e.preventDefault();
@@ -709,7 +721,19 @@ const App: React.FC = () => {
           return;
         }
 
+        // CTRL + T -> Toggle Batch Active State
         if (e.ctrlKey && key === 't') {
+            e.preventDefault(); // Try to prevent "New Tab"
+            if (backendConnected) {
+                setIsBatchActive(prev => !prev);
+            } else {
+                setShowModelSettings(true);
+            }
+            return;
+        }
+
+        // CTRL + B -> Toggle Labels
+        if (e.ctrlKey && key === 'b') {
             e.preventDefault();
             setLabelsVisible(prev => !prev);
             return;
@@ -764,7 +788,7 @@ const App: React.FC = () => {
                 setShowBoxFill(prev => !prev);
                 break;
             
-            case 't': // INFERENCE TRIGGER
+            case 't': // INFERENCE TRIGGER (Single)
                 if (!e.ctrlKey) { 
                     e.preventDefault();
                     handleRunInference();
@@ -792,13 +816,14 @@ const App: React.FC = () => {
                 }
                 setShowToolsMenu(false);
                 setShowGridConfig(false);
+                setShowBatchSettings(false);
                 break;
         }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSetup, nextImage, prevImage, nextLabel, prevLabel, handleLabelDelete, isCreating, showClassSelector, selectorIndex, classes, currentLabels, currentLabelIdx, showHelp, filteredClassList, classSearchTerm, pendingLabelIndex, inferenceConfig, currentImageIdx, backendConnected, showToolsMenu, viewMode, showGridConfig]);
+  }, [isSetup, nextImage, prevImage, nextLabel, prevLabel, handleLabelDelete, isCreating, showClassSelector, selectorIndex, classes, currentLabels, currentLabelIdx, showHelp, filteredClassList, classSearchTerm, pendingLabelIndex, inferenceConfig, currentImageIdx, backendConnected, showToolsMenu, viewMode, showGridConfig, isBatchActive, showBatchSettings]);
 
   useEffect(() => {
     if (showClassSelector && classSearchInputRef.current) {
@@ -817,6 +842,7 @@ const App: React.FC = () => {
         }
         setShowClassSelector(false);
         setShowGridConfig(false);
+        setShowBatchSettings(false);
     }
   };
   
@@ -868,19 +894,73 @@ const App: React.FC = () => {
                 {backendConnected ? 'Connected' : 'Offline'}
              </button>
              
-             {/* Batch Inference Controls */}
-             <div className="flex items-center bg-slate-800 rounded-lg border border-slate-700 p-0.5">
+             {/* Batch Inference Toggle Controls */}
+             <div className="flex items-center bg-slate-800 rounded-lg border border-slate-700 p-0.5 relative">
                  <button 
-                    onClick={isBatchRunning ? stopBatchInference : handleBatchInference}
+                    onClick={() => {
+                        if (backendConnected) setIsBatchActive(!isBatchActive);
+                        else setShowModelSettings(true);
+                    }}
                     disabled={!backendConnected}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${isBatchRunning 
-                        ? 'bg-red-600 text-white animate-pulse' 
-                        : (backendConnected ? 'bg-indigo-600 hover:bg-indigo-500 text-white' : 'bg-slate-700 text-slate-500 cursor-not-allowed')}`}
-                    title="Process next 50 images"
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-l-md text-xs font-bold transition-all border-r border-slate-900 ${isBatchActive
+                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white' 
+                        : (backendConnected ? 'bg-slate-700 hover:bg-slate-600 text-slate-300' : 'bg-slate-800 text-slate-600 cursor-not-allowed')}`}
+                    title="Toggle Auto-Detect Background Worker (Ctrl+T)"
                  >
-                    {isBatchRunning ? <StopCircle size={14} /> : <PlayCircle size={14} />}
-                    {isBatchRunning ? 'Stop Batch' : 'Batch (50)'}
+                    {isBatchActive ? <Zap size={14} className="fill-white" /> : <ZapOff size={14} />}
+                    {isBatchActive ? 'Auto: ON' : 'Auto: OFF'}
                  </button>
+                 <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        setShowBatchSettings(!showBatchSettings);
+                    }}
+                    className="px-2 py-1.5 rounded-r-md hover:bg-slate-600 text-slate-400 hover:text-white transition-colors"
+                    title="Batch Settings"
+                >
+                    <Sliders size={14} />
+                 </button>
+
+                 {/* Batch Settings Popover */}
+                 {showBatchSettings && (
+                    <div 
+                        className="absolute top-full right-0 mt-2 bg-slate-800 border border-slate-600 rounded-lg shadow-xl z-50 p-4 w-56"
+                        onMouseDown={(e) => e.stopPropagation()} 
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                         <h4 className="text-xs font-bold text-slate-400 uppercase mb-3 flex items-center gap-2">
+                             <Zap size={12} /> Auto-Detect Settings
+                         </h4>
+                         <div className="space-y-4">
+                             <div>
+                                 <label className="text-xs text-slate-300 flex justify-between mb-1">
+                                     Lookahead Buffer
+                                     <b className="text-indigo-400">{batchSettings.lookahead}</b>
+                                 </label>
+                                 <input 
+                                    type="range" min="10" max="200" step="10"
+                                    value={batchSettings.lookahead}
+                                    onChange={(e) => setBatchSettings(prev => ({...prev, lookahead: parseInt(e.target.value)}))}
+                                    className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                                 />
+                                 <p className="text-[10px] text-slate-500 mt-1">Images to pre-process ahead of current view.</p>
+                             </div>
+                             <div>
+                                 <label className="text-xs text-slate-300 flex justify-between mb-1">
+                                     Delay (Throttle)
+                                     <b className="text-indigo-400">{batchSettings.delay}ms</b>
+                                 </label>
+                                 <input 
+                                    type="range" min="0" max="1000" step="50"
+                                    value={batchSettings.delay}
+                                    onChange={(e) => setBatchSettings(prev => ({...prev, delay: parseInt(e.target.value)}))}
+                                    className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                                 />
+                                  <p className="text-[10px] text-slate-500 mt-1">Pause between requests to save CPU/Network.</p>
+                             </div>
+                         </div>
+                    </div>
+                )}
              </div>
             
              {/* Pending Predictions Indicator */}
@@ -905,8 +985,20 @@ const App: React.FC = () => {
                     {viewMode === 'single' ? <Square size={14} /> : <LayoutGrid size={14} />}
                     {viewMode === 'single' ? 'Single' : 'Matrix'}
                 </button>
+                {viewMode === 'grid' && (
+                     <button
+                        onClick={() => setGridMode(prev => prev === 'normal' ? 'zoom' : 'normal')}
+                        className={`flex items-center gap-2 px-3 py-1.5 text-xs font-bold transition-colors border-r border-slate-900 ${gridMode === 'zoom' ? 'bg-indigo-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}
+                        title="Toggle Zoom Mode"
+                     >
+                         {gridMode === 'normal' ? 'Normal' : 'Zoom'}
+                     </button>
+                )}
                 <button
-                    onClick={() => setShowGridConfig(!showGridConfig)}
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        setShowGridConfig(!showGridConfig);
+                    }}
                     className="px-2 py-1.5 rounded-r-md hover:bg-slate-600 text-slate-400 hover:text-white transition-colors"
                     title="Grid Settings"
                 >
@@ -915,29 +1007,125 @@ const App: React.FC = () => {
 
                 {/* Grid Config Popover */}
                 {showGridConfig && (
-                    <div className="absolute top-full right-0 mt-2 bg-slate-800 border border-slate-600 rounded-lg shadow-xl z-50 p-4 w-48">
+                    <div 
+                        className="absolute top-full right-0 mt-2 bg-slate-800 border border-slate-600 rounded-lg shadow-xl z-50 p-4 w-64"
+                        onMouseDown={(e) => e.stopPropagation()} 
+                        onClick={(e) => e.stopPropagation()}
+                    >
                          <h4 className="text-xs font-bold text-slate-400 uppercase mb-3 flex items-center gap-2">
-                             <Grid size={12} /> Matrix Layout
+                             <Grid size={12} /> Matrix Configuration
                          </h4>
+                         
+                         {/* Tabs Header */}
+                         <div className="flex border-b border-slate-600 mb-4">
+                            <button 
+                                onClick={() => setGridConfigTab('layout')}
+                                className={`flex-1 pb-2 text-[10px] font-bold uppercase transition-colors ${gridConfigTab === 'layout' ? 'text-indigo-400 border-b-2 border-indigo-500' : 'text-slate-500 hover:text-slate-300'}`}
+                            >
+                                Layout
+                            </button>
+                            <button 
+                                onClick={() => setGridConfigTab('zoom')}
+                                className={`flex-1 pb-2 text-[10px] font-bold uppercase transition-colors ${gridConfigTab === 'zoom' ? 'text-indigo-400 border-b-2 border-indigo-500' : 'text-slate-500 hover:text-slate-300'}`}
+                            >
+                                Zoom
+                            </button>
+                            <button 
+                                onClick={() => setGridConfigTab('playback')}
+                                className={`flex-1 pb-2 text-[10px] font-bold uppercase transition-colors ${gridConfigTab === 'playback' ? 'text-indigo-400 border-b-2 border-indigo-500' : 'text-slate-500 hover:text-slate-300'}`}
+                            >
+                                Cycle
+                            </button>
+                         </div>
+
+                         {/* Tab Content */}
                          <div className="space-y-3">
-                             <div>
-                                 <label className="text-xs text-slate-300 flex justify-between">Rows: <b>{gridConfig.rows}</b></label>
-                                 <input 
-                                    type="range" min="1" max="10" 
-                                    value={gridConfig.rows}
-                                    onChange={(e) => setGridConfig(prev => ({...prev, rows: parseInt(e.target.value)}))}
-                                    className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-indigo-500 mt-1"
-                                 />
-                             </div>
-                             <div>
-                                 <label className="text-xs text-slate-300 flex justify-between">Cols: <b>{gridConfig.cols}</b></label>
-                                 <input 
-                                    type="range" min="1" max="10" 
-                                    value={gridConfig.cols}
-                                    onChange={(e) => setGridConfig(prev => ({...prev, cols: parseInt(e.target.value)}))}
-                                    className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-indigo-500 mt-1"
-                                 />
-                             </div>
+                             {gridConfigTab === 'layout' && (
+                                 <>
+                                     <div>
+                                         <label className="text-xs text-slate-300 flex justify-between items-center mb-1">
+                                             Rows <b className="bg-slate-900 px-1 rounded">{gridConfig.rows}</b>
+                                         </label>
+                                         <input 
+                                            type="range" min="1" max="10" 
+                                            value={gridConfig.rows}
+                                            onChange={(e) => setGridConfig(prev => ({...prev, rows: parseInt(e.target.value)}))}
+                                            className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                                         />
+                                     </div>
+                                     <div>
+                                         <label className="text-xs text-slate-300 flex justify-between items-center mb-1">
+                                             Columns <b className="bg-slate-900 px-1 rounded">{gridConfig.cols}</b>
+                                         </label>
+                                         <input 
+                                            type="range" min="1" max="10" 
+                                            value={gridConfig.cols}
+                                            onChange={(e) => setGridConfig(prev => ({...prev, cols: parseInt(e.target.value)}))}
+                                            className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                                         />
+                                     </div>
+                                 </>
+                             )}
+
+                             {gridConfigTab === 'zoom' && (
+                                 <>
+                                    <div className="flex items-start gap-2 mb-2 p-2 bg-indigo-900/20 border border-indigo-500/20 rounded">
+                                        <ZoomIn size={14} className="text-indigo-400 mt-0.5" />
+                                        <p className="text-[10px] text-slate-400 leading-tight">Apply to Zoom Grid Mode.</p>
+                                    </div>
+                                    <div>
+                                         <label className="text-xs text-slate-300 flex justify-between items-center mb-1">
+                                             Crop Context <b className="bg-slate-900 px-1 rounded">{gridConfig.context}%</b>
+                                         </label>
+                                         <input 
+                                            type="range" min="0" max="100" 
+                                            value={gridConfig.context}
+                                            onChange={(e) => setGridConfig(prev => ({...prev, context: parseInt(e.target.value)}))}
+                                            className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                                         />
+                                     </div>
+                                     <div>
+                                         <label className="text-xs text-slate-300 flex justify-between items-center mb-1">
+                                             Magnification <b className="bg-slate-900 px-1 rounded">{gridConfig.magnification}x</b>
+                                         </label>
+                                         <input 
+                                            type="range" min="1" max="5" step="0.1"
+                                            value={gridConfig.magnification}
+                                            onChange={(e) => setGridConfig(prev => ({...prev, magnification: parseFloat(e.target.value)}))}
+                                            className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                                         />
+                                     </div>
+                                 </>
+                             )}
+
+                             {gridConfigTab === 'playback' && (
+                                 <>
+                                    <div className="flex items-start gap-2 mb-2 p-2 bg-amber-900/20 border border-amber-500/20 rounded">
+                                        <Clock size={14} className="text-amber-400 mt-0.5" />
+                                        <p className="text-[10px] text-slate-400 leading-tight">Cycle speed for images with multiple defects.</p>
+                                    </div>
+                                    <div>
+                                         <label className="text-xs text-slate-300 flex justify-between items-center mb-1">
+                                             Interval <b className="bg-slate-900 px-1 rounded">{gridConfig.interval / 1000}s</b>
+                                         </label>
+                                         <input 
+                                            type="range" min="500" max="10000" step="500"
+                                            value={gridConfig.interval}
+                                            onChange={(e) => setGridConfig(prev => ({...prev, interval: parseInt(e.target.value)}))}
+                                            className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                                         />
+                                     </div>
+                                     <div className="flex items-center justify-between mt-2">
+                                        <span className="text-xs text-slate-300">Auto-Play</span>
+                                        <button 
+                                            onClick={() => setGridConfig(prev => ({...prev, isPlaying: !prev.isPlaying}))}
+                                            className={`w-10 h-5 rounded-full relative transition-colors ${gridConfig.isPlaying ? 'bg-indigo-600' : 'bg-slate-600'}`}
+                                        >
+                                            <div className={`absolute top-1 left-1 bg-white w-3 h-3 rounded-full transition-transform ${gridConfig.isPlaying ? 'translate-x-5' : ''}`} />
+                                        </button>
+                                     </div>
+                                 </>
+                             )}
                          </div>
                     </div>
                 )}
@@ -946,7 +1134,10 @@ const App: React.FC = () => {
             {/* Tools Dropdown */}
             <div className="relative">
                 <button 
-                    onClick={() => setShowToolsMenu(!showToolsMenu)}
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        setShowToolsMenu(!showToolsMenu);
+                    }}
                     className="flex items-center gap-2 px-3 py-1.5 rounded text-xs font-bold bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
                 >
                     <Wrench size={14} />
@@ -955,7 +1146,11 @@ const App: React.FC = () => {
                 </button>
 
                 {showToolsMenu && (
-                    <div className="absolute top-full right-0 mt-2 w-48 bg-slate-800 border border-slate-600 rounded-lg shadow-xl z-50 overflow-hidden">
+                    <div 
+                        className="absolute top-full right-0 mt-2 w-48 bg-slate-800 border border-slate-600 rounded-lg shadow-xl z-50 overflow-hidden"
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => e.stopPropagation()}
+                    >
                         <div className="p-2 border-b border-slate-700">
                              <span className="text-[10px] text-slate-500 uppercase font-bold px-2">Visualization</span>
                              
@@ -965,7 +1160,7 @@ const App: React.FC = () => {
                              >
                                  {labelsVisible ? <Eye size={14} className="text-emerald-400" /> : <EyeOff size={14} className="text-slate-500" />}
                                  <span>{labelsVisible ? 'Hide Labels' : 'Show Labels'}</span>
-                                 <span className="ml-auto text-[10px] bg-slate-900 px-1 rounded text-slate-500">Ctrl+T</span>
+                                 <span className="ml-auto text-[10px] bg-slate-900 px-1 rounded text-slate-500">Ctrl+B</span>
                              </button>
 
                              <button 
@@ -1042,28 +1237,28 @@ const App: React.FC = () => {
         </div>
 
         <div className="w-40 flex justify-end items-center gap-2">
-            {isInferencing && !isBatchRunning && (
-                <span className="text-xs text-amber-400 flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> Processing...</span>
+            {isInferencing && (
+                <span className="text-xs text-amber-400 flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> Single...</span>
             )}
-             {isBatchRunning && (
-                <span className="text-xs text-indigo-400 flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> Batch Run...</span>
+             {isBackgroundProcessing && (
+                <span className="text-xs text-indigo-400 flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> Auto...</span>
             )}
-            {!isInferencing && !isBatchRunning && lastSaveStatus === 'saving' && (
+            {!isInferencing && !isBackgroundProcessing && lastSaveStatus === 'saving' && (
                 <span className="text-xs text-indigo-400 flex items-center gap-1"><Save size={12} className="animate-spin" /> Saving...</span>
             )}
-            {!isInferencing && !isBatchRunning && lastSaveStatus === 'saved' && (
+            {!isInferencing && !isBackgroundProcessing && lastSaveStatus === 'saved' && (
                 <span className="text-xs text-emerald-400 flex items-center gap-1"><CheckCircle size={12} /> Saved</span>
             )}
             {lastSaveStatus === 'error' && (
                 <span className="text-xs text-red-400">Save Error</span>
             )}
-            <span className="text-xs text-slate-600 ml-2">v2.4.0</span>
+            <span className="text-xs text-slate-600 ml-2">v2.5.0</span>
         </div>
       </header>
       
       {/* Click outside to close menus */}
-      {(showToolsMenu || showGridConfig) && (
-        <div className="fixed inset-0 z-40" onClick={() => { setShowToolsMenu(false); setShowGridConfig(false); }}></div>
+      {(showToolsMenu || showGridConfig || showBatchSettings) && (
+        <div className="fixed inset-0 z-40" onClick={() => { setShowToolsMenu(false); setShowGridConfig(false); setShowBatchSettings(false); }}></div>
       )}
 
       <div className="flex-1 flex overflow-hidden relative">
@@ -1088,6 +1283,9 @@ const App: React.FC = () => {
                         classes={classes}
                         onImageClick={handleGridImageClick}
                         filterClassId={filterClassId}
+                        gridMode={gridMode}
+                        zoomSettings={{ context: gridConfig.context, mag: gridConfig.magnification }}
+                        slideshowSettings={{ interval: gridConfig.interval, isPlaying: gridConfig.isPlaying }}
                     />
                 ) : (
                     <>
@@ -1180,7 +1378,11 @@ const App: React.FC = () => {
                              <h3 className="text-sm font-bold text-slate-400 uppercase border-b border-slate-700 pb-2">View Controls</h3>
                              <div className="flex justify-between items-center text-sm">
                                 <span className="text-slate-300">Toggle Labels</span>
-                                <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">Ctrl + T</span>
+                                <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">Ctrl + B</span>
+                            </div>
+                            <div className="flex justify-between items-center text-sm">
+                                <span className="text-indigo-300 font-bold">Toggle Auto-Detect</span>
+                                <span className="font-mono bg-indigo-900/50 border border-indigo-500/50 px-2 py-1 rounded text-white">Ctrl + T</span>
                             </div>
                              <div className="flex justify-between items-center text-sm">
                                 <span className="text-slate-300">Toggle Box Fill</span>
