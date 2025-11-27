@@ -10,6 +10,7 @@ interface ImageViewerProps {
   classes: string[];
   isCreating?: boolean;
   showBoxFill?: boolean; // New prop for fill mode
+  pendingLabelIndex?: number | null; // New prop for pending state
   onSelectLabel: (index: number) => void;
   onUpdateLabel: (label: YoloLabel, index?: number) => void;
   onCreateLabel?: (label: YoloLabel) => void;
@@ -24,6 +25,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
   classes,
   isCreating = false,
   showBoxFill = false,
+  pendingLabelIndex = null,
   onSelectLabel,
   onUpdateLabel,
   onCreateLabel,
@@ -339,17 +341,21 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
 
           {labels.map((label, idx) => {
             const isSelected = idx === currentLabelIndex;
+            const isPending = idx === pendingLabelIndex;
             
             const left = (label.x - label.w / 2) * 100;
             const top = (label.y - label.h / 2) * 100;
             const width = label.w * 100;
             const height = label.h * 100;
             
-            const color = getColor(label.classId);
-            const borderColor = color; // Always use class color
+            // Pending Logic: Neutral White Color, Dashed Border
+            const color = isPending ? 'white' : getColor(label.classId);
+            const borderColor = color;
             const borderWidth = isSelected ? '3px' : '2px';
+            const borderStyle = isPending ? 'dashed' : 'solid';
+            
             const opacityClass = isSelected ? 'opacity-100 z-50' : 'opacity-80 hover:opacity-100 z-10 hover:z-40';
-            const shadow = isSelected ? `0 0 0 2px white, 0 0 10px ${color}` : 'none'; // Distinct white outline for selection
+            const shadow = isSelected && !isPending ? `0 0 0 2px white, 0 0 10px ${color}` : (isPending ? '0 0 10px rgba(255,255,255,0.5)' : 'none');
 
             return (
               <div
@@ -363,7 +369,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                 }}
               >
                 {/* Internal Fill (Visible when 'b' is pressed) */}
-                {showBoxFill && !isCreating && (
+                {showBoxFill && !isCreating && !isPending && (
                   <div 
                      onMouseDown={(e) => startResize(e, 'move', label, idx)}
                      className="absolute inset-0 cursor-move pointer-events-auto transition-colors"
@@ -375,35 +381,35 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                 <div 
                   onMouseDown={(e) => startResize(e, 'move', label, idx)}
                   className={`absolute top-0 left-0 w-full ${!isCreating && 'cursor-move pointer-events-auto'}`}
-                  style={{ height: borderWidth, backgroundColor: borderColor, boxShadow: shadow, transform: 'translateY(-50%)' }}
+                  style={{ height: borderWidth, backgroundColor: borderColor, borderTopStyle: borderStyle, boxShadow: shadow, transform: 'translateY(-50%)' }}
                 />
                 <div 
                   onMouseDown={(e) => startResize(e, 'move', label, idx)}
                   className={`absolute bottom-0 left-0 w-full ${!isCreating && 'cursor-move pointer-events-auto'}`}
-                  style={{ height: borderWidth, backgroundColor: borderColor, boxShadow: shadow, transform: 'translateY(50%)' }}
+                  style={{ height: borderWidth, backgroundColor: borderColor, borderBottomStyle: borderStyle, boxShadow: shadow, transform: 'translateY(50%)' }}
                 />
                 <div 
                   onMouseDown={(e) => startResize(e, 'move', label, idx)}
                   className={`absolute top-0 left-0 h-full ${!isCreating && 'cursor-move pointer-events-auto'}`}
-                  style={{ width: borderWidth, backgroundColor: borderColor, boxShadow: shadow, transform: 'translateX(-50%)' }}
+                  style={{ width: borderWidth, backgroundColor: borderColor, borderLeftStyle: borderStyle, boxShadow: shadow, transform: 'translateX(-50%)' }}
                 />
                 <div 
                   onMouseDown={(e) => startResize(e, 'move', label, idx)}
                   className={`absolute top-0 right-0 h-full ${!isCreating && 'cursor-move pointer-events-auto'}`}
-                  style={{ width: borderWidth, backgroundColor: borderColor, boxShadow: shadow, transform: 'translateX(50%)' }}
+                  style={{ width: borderWidth, backgroundColor: borderColor, borderRightStyle: borderStyle, boxShadow: shadow, transform: 'translateX(50%)' }}
                 />
 
                 {(isSelected || width > 0) && (
                    <div 
-                    className="absolute bottom-full left-0 mb-1 px-1.5 py-0.5 text-xs font-bold text-white whitespace-nowrap bg-black/75 rounded shadow-sm pointer-events-none transform origin-bottom-left"
+                    className={`absolute bottom-full left-0 mb-1 px-1.5 py-0.5 text-xs font-bold whitespace-nowrap rounded shadow-sm pointer-events-none transform origin-bottom-left ${isPending ? 'bg-white text-black' : 'bg-black/75 text-white'}`}
                     style={{ borderLeft: `4px solid ${color}` }}
                    >
-                     {classes[label.classId] || label.classId}
+                     {isPending ? 'Pending Class...' : (classes[label.classId] || label.classId)}
                    </div>
                 )}
 
                 {/* Resize Handles */}
-                {isSelected && !isCreating && (
+                {isSelected && !isCreating && !isPending && (
                   <>
                     <div className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-white border border-black cursor-nwse-resize z-50 rounded-sm pointer-events-auto"
                          onMouseDown={(e) => startResize(e, 'tl', label, idx)} />

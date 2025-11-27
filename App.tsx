@@ -72,6 +72,11 @@ const App: React.FC = () => {
   // Working State
   const [currentLabels, setCurrentLabels] = useState<YoloLabel[]>([]);
   const [lastSaveStatus, setLastSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  
+  // Pending Creation State
+  // When creating a label, we hold its index here until the class is selected.
+  // While pending, it is NOT saved to disk. If cancelled, it is removed.
+  const [pendingLabelIndex, setPendingLabelIndex] = useState<number | null>(null);
 
   // Load Setup Data
   const handleSetupComplete = (
@@ -211,6 +216,7 @@ const App: React.FC = () => {
     const parsed = parseYoloString(rawContent);
     
     setCurrentLabels(parsed);
+    setPendingLabelIndex(null); // Clear pending if switching images
     
     // Reset temporary modes
     setIsCreating(false);
@@ -275,6 +281,12 @@ const App: React.FC = () => {
 
         newLabels[targetIdx] = updatedLabel;
         setCurrentLabels(newLabels);
+        
+        // Use this update to finalize pending label
+        if (pendingLabelIndex === targetIdx) {
+            setPendingLabelIndex(null);
+        }
+
         updateRawDataAndSave(newLabels);
     }
   };
@@ -285,21 +297,42 @@ const App: React.FC = () => {
 
       const labelToAdd = { ...newLabel, classId: defaultClass };
       const newLabels = [...currentLabels, labelToAdd];
+      const newIndex = newLabels.length - 1;
       
       setCurrentLabels(newLabels);
-      setCurrentLabelIdx(newLabels.length - 1); // Select the new label
+      setCurrentLabelIdx(newIndex); // Select the new label
+      setPendingLabelIndex(newIndex); // Mark as pending (not saved yet)
+      
       setIsCreating(false); // Turn off create mode
-      updateRawDataAndSave(newLabels);
+      
+      // We do NOT save to disk yet. We wait for user to pick class.
+      // updateRawDataAndSave(newLabels); <--- Removed
 
       // Immediately open selector to prompt user for class
-      // Because filteredClassList is sorted by usage, the most used one will be at index 0
       setClassSearchTerm("");
       setSelectorIndex(0);
       setShowClassSelector(true);
   };
 
+  const cancelPendingLabel = () => {
+      if (pendingLabelIndex !== null && pendingLabelIndex < currentLabels.length) {
+          // Remove the pending label
+          const newLabels = [...currentLabels];
+          newLabels.splice(pendingLabelIndex, 1);
+          setCurrentLabels(newLabels);
+          setPendingLabelIndex(null);
+          setCurrentLabelIdx(Math.max(0, newLabels.length - 1));
+          // Do not save to disk, as it was never written
+      }
+  };
+
   const handleLabelDelete = () => {
       if (currentLabelIdx >= 0 && currentLabelIdx < currentLabels.length) {
+          // If deleting the pending label, just clear pending status (no file update needed if it wasn't saved, but logic simplifies if we just write clean state)
+          if (currentLabelIdx === pendingLabelIndex) {
+              setPendingLabelIndex(null);
+          }
+
           const newLabels = [...currentLabels];
           // Removes ONLY the specific label at currentLabelIdx
           newLabels.splice(currentLabelIdx, 1);
@@ -399,6 +432,10 @@ const App: React.FC = () => {
         if (showClassSelector) {
             if (e.key === 'Escape') {
                 e.preventDefault();
+                // If we are pending creation, we must cancel the box
+                if (pendingLabelIndex !== null) {
+                    cancelPendingLabel();
+                }
                 setShowClassSelector(false);
             } else if (e.key === 'Enter') {
                 e.preventDefault();
@@ -543,7 +580,7 @@ const App: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSetup, nextImage, prevImage, nextLabel, prevLabel, handleLabelDelete, isCreating, showClassSelector, selectorIndex, classes, currentLabels, currentLabelIdx, showHelp, filteredClassList, classSearchTerm]);
+  }, [isSetup, nextImage, prevImage, nextLabel, prevLabel, handleLabelDelete, isCreating, showClassSelector, selectorIndex, classes, currentLabels, currentLabelIdx, showHelp, filteredClassList, classSearchTerm, pendingLabelIndex]);
 
   // Focus Input when selector opens
   useEffect(() => {
@@ -556,6 +593,16 @@ const App: React.FC = () => {
   useEffect(() => {
      setSelectorIndex(0);
   }, [classSearchTerm]);
+
+  // Handle outside click to close/cancel modal
+  const handleModalBackgroundClick = (e: React.MouseEvent) => {
+    if (e.target === e.currentTarget) {
+        if (pendingLabelIndex !== null) {
+            cancelPendingLabel();
+        }
+        setShowClassSelector(false);
+    }
+  };
 
   if (!isSetup) {
     return <SetupScreen onComplete={handleSetupComplete} />;
@@ -691,6 +738,7 @@ const App: React.FC = () => {
                     classes={classes}
                     isCreating={isCreating}
                     showBoxFill={showBoxFill}
+                    pendingLabelIndex={pendingLabelIndex}
                     onSelectLabel={setCurrentLabelIdx}
                     onUpdateLabel={handleLabelUpdate}
                     onCreateLabel={handleLabelCreate}
@@ -800,15 +848,19 @@ const App: React.FC = () => {
 
         {/* --- CLASS SELECTOR MODAL --- */}
         {showClassSelector && (
-            <div className="absolute inset-0 z-[100] bg-black/25 backdrop-blur-[2px] flex items-center justify-center">
+            <div 
+                className="absolute inset-0 z-[100] bg-black/25 backdrop-blur-[2px] flex items-center justify-center"
+                onClick={handleModalBackgroundClick}
+            >
                 <div 
                     ref={classSelectorRef}
                     className="bg-slate-800 border border-slate-600 rounded-xl shadow-2xl w-96 max-h-[80vh] flex flex-col"
+                    onClick={e => e.stopPropagation()}
                 >
                     <div className="p-4 border-b border-slate-700">
                         <h3 className="text-lg font-bold text-white flex items-center gap-2 mb-3">
                             <Search size={20} className="text-indigo-400" /> 
-                            Select Class
+                            {pendingLabelIndex !== null ? 'Select Class for New Label' : 'Change Class'}
                         </h3>
                         <div className="relative">
                             <input
@@ -837,8 +889,8 @@ const App: React.FC = () => {
                                                     ...currentLabels[currentLabelIdx],
                                                     classId: newId
                                                 });
+                                                setShowClassSelector(false);
                                             }
-                                            setShowClassSelector(false);
                                         });
                                      }}
                                 >
@@ -870,7 +922,6 @@ const App: React.FC = () => {
                                         <div className="flex items-center gap-3">
                                             <span className="font-mono text-xs opacity-60 w-6 text-right bg-black/20 rounded px-1">{item.index}</span>
                                             <span className="font-semibold">{item.name}</span>
-                                            {item.count > 0 && <span className="text-[10px] bg-slate-600 px-1.5 rounded text-slate-300">{item.count}</span>}
                                         </div>
                                         {isActive && <CheckCircle size={16} />}
                                     </div>
