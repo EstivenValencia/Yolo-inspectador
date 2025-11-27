@@ -2,9 +2,11 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { SetupScreen } from './components/SetupScreen';
 import { ImageViewer } from './components/ImageViewer';
 import { DetailPanel } from './components/DetailPanel';
+import { ModelSettings } from './components/ModelSettings';
 import { ImageAsset, YoloLabel, FileSystemFileHandle, FileSystemDirectoryHandle } from './types';
 import { parseYoloString, serializeYoloString } from './utils/yoloHelper';
-import { ArrowLeft, ArrowRight, Image as ImageIcon, Filter, CheckCircle, Save, PlusSquare, BoxSelect, Home, Search, Keyboard, X, PlusCircle } from 'lucide-react';
+import { detectObjects, BackendConfig, checkBackendHealth } from './utils/apiHelper';
+import { ArrowLeft, ArrowRight, Image as ImageIcon, Filter, CheckCircle, Save, PlusSquare, BoxSelect, Home, Search, Keyboard, X, PlusCircle, Cpu, Wifi, WifiOff, FileCheck } from 'lucide-react';
 
 const App: React.FC = () => {
   const [isSetup, setIsSetup] = useState(false);
@@ -44,9 +46,30 @@ const App: React.FC = () => {
       }
   });
 
+  // Inference State
+  const [showModelSettings, setShowModelSettings] = useState(false);
+  const [inferenceConfig, setInferenceConfig] = useState<BackendConfig>({
+      apiUrl: 'http://localhost:5000',
+      confidenceThreshold: 0.25,
+      iouThreshold: 0.45
+  });
+  const [isInferencing, setIsInferencing] = useState(false);
+  const [backendConnected, setBackendConnected] = useState(false);
+
   useEffect(() => {
      localStorage.setItem('defect_inspector_zoom', JSON.stringify(zoomSettings));
   }, [zoomSettings]);
+
+  // Check Backend Connection periodically
+  useEffect(() => {
+      const check = async () => {
+          const isUp = await checkBackendHealth(inferenceConfig.apiUrl);
+          setBackendConnected(isUp);
+      };
+      check();
+      const interval = setInterval(check, 5000);
+      return () => clearInterval(interval);
+  }, [inferenceConfig.apiUrl]);
 
   // Helper to increment usage
   const recordClassUsage = (className: string) => {
@@ -74,8 +97,6 @@ const App: React.FC = () => {
   const [lastSaveStatus, setLastSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   
   // Pending Creation State
-  // When creating a label, we hold its index here until the class is selected.
-  // While pending, it is NOT saved to disk. If cancelled, it is removed.
   const [pendingLabelIndex, setPendingLabelIndex] = useState<number | null>(null);
 
   // Load Setup Data
@@ -168,18 +189,13 @@ const App: React.FC = () => {
   }, [filterClassId]);
 
   // --- Filter Logic for Class Selector ---
-  // Returns array of { index: number, name: string }
-  // SORTED BY USAGE FREQUENCY
   const filteredClassList = useMemo(() => {
-      // 1. Map to rich objects
       const mapped = classes.map((c, i) => ({ 
           index: i, 
           name: c, 
           count: classUsage[c] || 0 
       }));
 
-      // 2. Sort by Usage Count (Descending)
-      // If counts are equal, keep original index order (stability)
       mapped.sort((a, b) => {
           if (b.count !== a.count) return b.count - a.count;
           return a.index - b.index;
@@ -187,8 +203,6 @@ const App: React.FC = () => {
 
       const term = classSearchTerm.toLowerCase();
       if (!term) return mapped;
-      
-      // 3. Filter list by search term
       return mapped.filter(item => item.name.toLowerCase().includes(term));
   }, [classes, classSearchTerm, classUsage]);
 
@@ -216,9 +230,8 @@ const App: React.FC = () => {
     const parsed = parseYoloString(rawContent);
     
     setCurrentLabels(parsed);
-    setPendingLabelIndex(null); // Clear pending if switching images
+    setPendingLabelIndex(null); 
     
-    // Reset temporary modes
     setIsCreating(false);
     setShowClassSelector(false);
 
@@ -272,7 +285,6 @@ const App: React.FC = () => {
 
     const newLabels = [...currentLabels];
     if (targetIdx >= 0 && targetIdx < newLabels.length) {
-        // Record Usage if class ID changed
         const oldClassId = newLabels[targetIdx].classId;
         if (oldClassId !== updatedLabel.classId) {
             const className = classes[updatedLabel.classId];
@@ -282,7 +294,6 @@ const App: React.FC = () => {
         newLabels[targetIdx] = updatedLabel;
         setCurrentLabels(newLabels);
         
-        // Use this update to finalize pending label
         if (pendingLabelIndex === targetIdx) {
             setPendingLabelIndex(null);
         }
@@ -292,54 +303,95 @@ const App: React.FC = () => {
   };
 
   const handleLabelCreate = (newLabel: YoloLabel) => {
-      // Use 0 as temporary placeholder, but open selector immediately
       const defaultClass = 0;
-
       const labelToAdd = { ...newLabel, classId: defaultClass };
       const newLabels = [...currentLabels, labelToAdd];
       const newIndex = newLabels.length - 1;
       
       setCurrentLabels(newLabels);
-      setCurrentLabelIdx(newIndex); // Select the new label
-      setPendingLabelIndex(newIndex); // Mark as pending (not saved yet)
+      setCurrentLabelIdx(newIndex); 
+      setPendingLabelIndex(newIndex); 
       
-      setIsCreating(false); // Turn off create mode
+      setIsCreating(false); 
       
-      // We do NOT save to disk yet. We wait for user to pick class.
-      // updateRawDataAndSave(newLabels); <--- Removed
-
-      // Immediately open selector to prompt user for class
       setClassSearchTerm("");
       setSelectorIndex(0);
       setShowClassSelector(true);
   };
 
+  const handleRunInference = async () => {
+    const currentImg = filteredImages[currentImageIdx];
+    
+    if (!backendConnected) {
+        setShowModelSettings(true);
+        return;
+    }
+
+    if (!currentImg || !currentImg.file) {
+        alert("Image file not available in memory.");
+        return;
+    }
+
+    setIsInferencing(true);
+    try {
+        const predictions = await detectObjects(currentImg.file, inferenceConfig);
+
+        if (predictions.length > 0) {
+            // Append predictions to current view
+            // NOTE: These are NOT saved to disk yet. They have isPredicted: true.
+            const newLabels = [...currentLabels, ...predictions];
+            setCurrentLabels(newLabels);
+            setCurrentLabelIdx(newLabels.length - 1);
+        } else {
+            alert("No objects detected with current confidence threshold.");
+        }
+    } catch (e) {
+        console.error("Inference failed", e);
+        alert("Inference failed. Is the Python backend running?");
+    } finally {
+        setIsInferencing(false);
+    }
+  };
+  
+  const handleAcceptPredictions = () => {
+      const hasPredictions = currentLabels.some(l => l.isPredicted);
+      if (!hasPredictions) return;
+
+      // Remove the predicted flag, effectively converting them to regular labels
+      const newLabels = currentLabels.map(l => {
+          if (l.isPredicted) {
+              const { isPredicted, ...rest } = l;
+              return rest;
+          }
+          return l;
+      });
+
+      setCurrentLabels(newLabels);
+      // Now we save, including the newly accepted labels
+      updateRawDataAndSave(newLabels, true); 
+  };
+
   const cancelPendingLabel = () => {
       if (pendingLabelIndex !== null && pendingLabelIndex < currentLabels.length) {
-          // Remove the pending label
           const newLabels = [...currentLabels];
           newLabels.splice(pendingLabelIndex, 1);
           setCurrentLabels(newLabels);
           setPendingLabelIndex(null);
           setCurrentLabelIdx(Math.max(0, newLabels.length - 1));
-          // Do not save to disk, as it was never written
       }
   };
 
   const handleLabelDelete = () => {
       if (currentLabelIdx >= 0 && currentLabelIdx < currentLabels.length) {
-          // If deleting the pending label, just clear pending status (no file update needed if it wasn't saved, but logic simplifies if we just write clean state)
           if (currentLabelIdx === pendingLabelIndex) {
               setPendingLabelIndex(null);
           }
 
           const newLabels = [...currentLabels];
-          // Removes ONLY the specific label at currentLabelIdx
           newLabels.splice(currentLabelIdx, 1);
           
           setCurrentLabels(newLabels);
           
-          // Smart selection: Select previous one, or 0, or -1 if empty
           if (newLabels.length > 0) {
               const newIdx = Math.max(0, currentLabelIdx - 1);
               setCurrentLabelIdx(newIdx);
@@ -351,26 +403,29 @@ const App: React.FC = () => {
       }
   };
 
-  const updateRawDataAndSave = async (newLabels: YoloLabel[]) => {
+  const updateRawDataAndSave = async (newLabels: YoloLabel[], forceSavePredictions: boolean = false) => {
       if (!filteredImages[currentImageIdx]) return;
 
       const imgKey = filteredImages[currentImageIdx].name.replace(/\.[^/.]+$/, "");
-      const newRaw = serializeYoloString(newLabels);
       
-      // 1. Update In-Memory State for fast UI response
+      // CRITICAL: Filter out predictions so they are NOT saved to disk unless explicitly accepted (forceSavePredictions)
+      const labelsToSave = forceSavePredictions 
+        ? newLabels 
+        : newLabels.filter(l => !l.isPredicted);
+
+      const newRaw = serializeYoloString(labelsToSave);
+      
       const newLabelsMap = new Map(labelsRaw);
       newLabelsMap.set(imgKey, newRaw);
       setLabelsRaw(newLabelsMap);
 
-      // 2. Write to Disk
       setLastSaveStatus('saving');
       try {
         let handle = labelHandles.get(imgKey);
         
-        // If handle doesn't exist, we need to create the file in the directory
         if (!handle && labelsDirHandle) {
+            // Only create file if we actually have data to save, or if we want to save an empty file
              handle = await labelsDirHandle.getFileHandle(`${imgKey}.txt`, { create: true });
-             // Update handles map
              const newHandles = new Map(labelHandles);
              newHandles.set(imgKey, handle);
              setLabelHandles(newHandles);
@@ -381,11 +436,8 @@ const App: React.FC = () => {
             await writable.write(newRaw);
             await writable.close();
             setLastSaveStatus('saved');
-            
-            // Revert status after 1.5s
             setTimeout(() => setLastSaveStatus('idle'), 1500);
         } else {
-            console.error("No file handle and no directory handle available.");
             setLastSaveStatus('error');
         }
 
@@ -395,16 +447,13 @@ const App: React.FC = () => {
       }
   }
 
-  // --- Dynamic Class Creation Logic ---
   const handleAddNewClass = async (newClassName: string) => {
       const trimmed = newClassName.trim();
       if (!trimmed) return;
 
-      // Update State
       const newClasses = [...classes, trimmed];
       setClasses(newClasses);
 
-      // Write to classes.txt
       if (classFileHandle) {
           try {
               const writable = await classFileHandle.createWritable();
@@ -413,14 +462,10 @@ const App: React.FC = () => {
           } catch (e) {
               console.error("Failed to save new class to file", e);
           }
-      } else {
-         console.warn("No class file handle available to save class");
       }
 
-      // Record initial usage so it pops up next time
       recordClassUsage(trimmed);
-
-      return newClasses.length - 1; // Return the new index
+      return newClasses.length - 1;
   };
 
   // --- Keyboard Shortcuts ---
@@ -428,27 +473,19 @@ const App: React.FC = () => {
     if (!isSetup) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-        // If typing in search box, don't trigger standard shortcuts except navigation within modal
         if (showClassSelector) {
             if (e.key === 'Escape') {
                 e.preventDefault();
-                // If we are pending creation, we must cancel the box
                 if (pendingLabelIndex !== null) {
                     cancelPendingLabel();
                 }
                 setShowClassSelector(false);
             } else if (e.key === 'Enter') {
                 e.preventDefault();
-                // Logic: 
-                // 1. If user typed "barrido" and filtered list is EMPTY -> CREATE "barrido"
-                // 2. If user typed "ba" and filtered list has "basura" -> SELECT "basura"
-                // 3. If user typed "basura" and it exists -> SELECT "basura"
-
                 const hasExactMatch = filteredClassList.find(c => c.name.toLowerCase() === classSearchTerm.toLowerCase());
                 const hasMatches = filteredClassList.length > 0;
                 
                 if (hasExactMatch) {
-                   // Exact match found (case insensitive)
                    if (currentLabels[currentLabelIdx]) {
                         handleLabelUpdate({
                             ...currentLabels[currentLabelIdx],
@@ -457,9 +494,6 @@ const App: React.FC = () => {
                         setShowClassSelector(false);
                    }
                 } else if (hasMatches && classSearchTerm.length < 3) {
-                   // If purely searching (short term) OR empty search (Enter on most frequent)
-                   // e.g. "ba" -> select first item "basura"
-                   // e.g. "" -> select first item (Highest Usage)
                    const selectedClass = filteredClassList[selectorIndex];
                    if (selectedClass && currentLabels[currentLabelIdx]) {
                         handleLabelUpdate({
@@ -469,7 +503,6 @@ const App: React.FC = () => {
                         setShowClassSelector(false);
                    }
                 } else if (classSearchTerm.trim().length > 0) {
-                    // Create New because specific term was typed and no exact match
                     handleAddNewClass(classSearchTerm).then((newId) => {
                         if (newId !== undefined && currentLabels[currentLabelIdx]) {
                             handleLabelUpdate({
@@ -480,7 +513,6 @@ const App: React.FC = () => {
                         setShowClassSelector(false);
                     });
                 } else if (hasMatches) {
-                     // Fallback for empty search term + Enter -> Select currently highlighted (Most frequent)
                      const selectedClass = filteredClassList[selectorIndex];
                      if (selectedClass && currentLabels[currentLabelIdx]) {
                         handleLabelUpdate({
@@ -505,9 +537,6 @@ const App: React.FC = () => {
 
         var key = e.key.toLowerCase();
 
-        // -----------------------
-        // HELP TOGGLE (Global)
-        // -----------------------
         if (e.ctrlKey && key === 'h') {
           e.preventDefault();
           setShowHelp(prev => !prev);
@@ -519,9 +548,6 @@ const App: React.FC = () => {
             return; 
         }
 
-        // -----------------------
-        // NORMAL MODE
-        // -----------------------
         switch (key) {
             case 'd': // Next Image
             case 'arrowright':
@@ -544,7 +570,6 @@ const App: React.FC = () => {
                 prevLabel();
                 break;
             
-            // REASSIGNED SHORTCUTS
             case 'q': // Delete Label
             case 'delete':
                 e.preventDefault();
@@ -559,13 +584,22 @@ const App: React.FC = () => {
                 setShowBoxFill(prev => !prev);
                 break;
             
+            case 't': // INFERENCE TRIGGER
+                e.preventDefault();
+                handleRunInference();
+                break;
+            
+            case 'y': // ACCEPT PREDICTIONS
+                e.preventDefault();
+                handleAcceptPredictions();
+                break;
+
             case 'r': // Rename / Reclassify
                 if (currentLabels.length > 0 && currentLabelIdx !== -1) {
                     e.preventDefault();
                     setClassSearchTerm("");
-                    setSelectorIndex(0); // This will default to the most frequent class (index 0 of sorted list)
+                    setSelectorIndex(0); 
                     setShowClassSelector(true);
-                    // Focus logic is handled in useEffect below
                 }
                 break;
 
@@ -580,21 +614,18 @@ const App: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSetup, nextImage, prevImage, nextLabel, prevLabel, handleLabelDelete, isCreating, showClassSelector, selectorIndex, classes, currentLabels, currentLabelIdx, showHelp, filteredClassList, classSearchTerm, pendingLabelIndex]);
+  }, [isSetup, nextImage, prevImage, nextLabel, prevLabel, handleLabelDelete, isCreating, showClassSelector, selectorIndex, classes, currentLabels, currentLabelIdx, showHelp, filteredClassList, classSearchTerm, pendingLabelIndex, inferenceConfig, currentImageIdx, backendConnected]);
 
-  // Focus Input when selector opens
   useEffect(() => {
     if (showClassSelector && classSearchInputRef.current) {
         classSearchInputRef.current.focus();
     }
   }, [showClassSelector]);
 
-  // Reset index when search changes
   useEffect(() => {
      setSelectorIndex(0);
   }, [classSearchTerm]);
 
-  // Handle outside click to close/cancel modal
   const handleModalBackgroundClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) {
         if (pendingLabelIndex !== null) {
@@ -609,11 +640,10 @@ const App: React.FC = () => {
   }
 
   const currentImage = filteredImages[currentImageIdx];
+  const pendingPredictionsCount = currentLabels.filter(l => l.isPredicted).length;
 
   return (
     <div className="h-screen w-screen flex flex-col bg-slate-950 overflow-hidden relative">
-      
-      {/* Top Header */}
       <header className="h-16 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-6 shrink-0 z-20">
         <div className="flex items-center gap-4">
             <button 
@@ -638,6 +668,28 @@ const App: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-4">
+             {/* Model Button */}
+             <button
+                onClick={() => setShowModelSettings(true)}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-bold transition-all border ${backendConnected ? 'bg-emerald-900/50 border-emerald-500 text-emerald-300 hover:bg-emerald-900' : 'bg-red-900/30 border-red-800 text-red-400 hover:bg-red-900/50'}`}
+                title="Configure Backend"
+             >
+                {backendConnected ? <Wifi size={14} /> : <WifiOff size={14} />}
+                {backendConnected ? 'Backend Connected' : 'Backend Disconnected'}
+             </button>
+            
+             {/* Pending Predictions Indicator */}
+             {pendingPredictionsCount > 0 && (
+                 <button 
+                    onClick={handleAcceptPredictions}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded text-xs font-bold transition-all border bg-amber-900/50 border-amber-500 text-amber-300 hover:bg-amber-900 animate-pulse"
+                    title="Click or press Y to save predictions to disk"
+                 >
+                    <FileCheck size={14} />
+                    {pendingPredictionsCount} Unsaved Predictions (Y)
+                 </button>
+             )}
+
              {/* Box Fill Toggle */}
              <button 
                 onClick={() => setShowBoxFill(!showBoxFill)}
@@ -648,7 +700,6 @@ const App: React.FC = () => {
                 {showBoxFill ? 'Fill On (F)' : 'Fill Off (F)'}
              </button>
 
-             {/* Mode Indicator Button */}
              <button 
                 onClick={() => setIsCreating(!isCreating)}
                 className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-bold transition-all border ${isCreating ? 'bg-indigo-600 border-indigo-500 text-white animate-pulse' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'}`}
@@ -658,7 +709,6 @@ const App: React.FC = () => {
                 {isCreating ? 'CREATING MODE' : 'Create New Box (E)'}
              </button>
 
-             {/* Filter Dropdown */}
              <div className="flex items-center gap-2 mr-2 border-r border-slate-700 pr-4">
                 <Filter size={16} className="text-slate-400" />
                 <span className="text-xs text-slate-400 font-semibold uppercase hidden sm:block">Filter:</span>
@@ -705,10 +755,13 @@ const App: React.FC = () => {
         </div>
 
         <div className="w-40 flex justify-end items-center gap-2">
-            {lastSaveStatus === 'saving' && (
+            {isInferencing && (
+                <span className="text-xs text-amber-400 flex items-center gap-1"><Cpu size={12} className="animate-spin" /> Processing...</span>
+            )}
+            {!isInferencing && lastSaveStatus === 'saving' && (
                 <span className="text-xs text-indigo-400 flex items-center gap-1"><Save size={12} className="animate-spin" /> Saving...</span>
             )}
-            {lastSaveStatus === 'saved' && (
+            {!isInferencing && lastSaveStatus === 'saved' && (
                 <span className="text-xs text-emerald-400 flex items-center gap-1"><CheckCircle size={12} /> Saved</span>
             )}
             {lastSaveStatus === 'error' && (
@@ -718,7 +771,6 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      {/* Main Content Area */}
       <div className="flex-1 flex overflow-hidden relative">
         {(filteredImages.length === 0 || !currentImage) ? (
             <div className="flex-1 flex flex-col items-center justify-center text-slate-500">
@@ -730,7 +782,6 @@ const App: React.FC = () => {
             </div>
         ) : (
             <>
-                {/* Left: Image Viewer */}
                 <ImageViewer 
                     image={currentImage}
                     labels={currentLabels}
@@ -743,16 +794,12 @@ const App: React.FC = () => {
                     onUpdateLabel={handleLabelUpdate}
                     onCreateLabel={handleLabelCreate}
                 />
-
-                {/* Resizer Handle */}
                 <div 
                 onMouseDown={startResizing}
                 className={`w-2 bg-slate-800 hover:bg-indigo-500 cursor-col-resize flex items-center justify-center transition-colors z-30 shrink-0 ${isResizing ? 'bg-indigo-500' : ''}`}
                 >
                 <div className="h-8 w-1 rounded-full bg-slate-600/50"></div>
                 </div>
-
-                {/* Right: Details & Zoom */}
                 <DetailPanel 
                     width={panelWidth}
                     currentImage={currentImage}
@@ -771,8 +818,6 @@ const App: React.FC = () => {
                 />
             </>
         )}
-
-        {/* --- HELP MODAL --- */}
         {showHelp && (
             <div className="absolute inset-0 z-[110] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowHelp(false)}>
                 <div className="bg-slate-800 border border-slate-600 rounded-xl shadow-2xl max-w-2xl w-full p-6" onClick={e => e.stopPropagation()}>
@@ -784,7 +829,6 @@ const App: React.FC = () => {
                             <X size={24} />
                         </button>
                     </div>
-                    
                     <div className="grid grid-cols-2 gap-x-8 gap-y-4">
                         <div className="space-y-4">
                             <h3 className="text-sm font-bold text-slate-400 uppercase border-b border-slate-700 pb-2">Navigation</h3>
@@ -797,7 +841,6 @@ const App: React.FC = () => {
                                 <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">W / S</span>
                             </div>
                         </div>
-
                         <div className="space-y-4">
                              <h3 className="text-sm font-bold text-slate-400 uppercase border-b border-slate-700 pb-2">Editing</h3>
                              <div className="flex justify-between items-center text-sm">
@@ -812,8 +855,15 @@ const App: React.FC = () => {
                                 <span className="text-slate-300">Change Class</span>
                                 <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">R</span>
                             </div>
+                             <div className="flex justify-between items-center text-sm">
+                                <span className="text-emerald-300 font-bold">Auto-Detect (Predictions)</span>
+                                <span className="font-mono bg-emerald-900/50 border border-emerald-500/50 px-2 py-1 rounded text-white">T</span>
+                            </div>
+                             <div className="flex justify-between items-center text-sm">
+                                <span className="text-amber-300 font-bold">Confirm Predictions</span>
+                                <span className="font-mono bg-amber-900/50 border border-amber-500/50 px-2 py-1 rounded text-white">Y</span>
+                            </div>
                         </div>
-
                         <div className="space-y-4">
                              <h3 className="text-sm font-bold text-slate-400 uppercase border-b border-slate-700 pb-2">View Controls</h3>
                              <div className="flex justify-between items-center text-sm">
@@ -829,7 +879,6 @@ const App: React.FC = () => {
                                 <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">Ctrl + Scroll</span>
                             </div>
                         </div>
-                        
                          <div className="space-y-4">
                              <h3 className="text-sm font-bold text-slate-400 uppercase border-b border-slate-700 pb-2">General</h3>
                              <div className="flex justify-between items-center text-sm">
@@ -845,8 +894,6 @@ const App: React.FC = () => {
                 </div>
             </div>
         )}
-
-        {/* --- CLASS SELECTOR MODAL --- */}
         {showClassSelector && (
             <div 
                 className="absolute inset-0 z-[100] bg-black/25 backdrop-blur-[2px] flex items-center justify-center"
@@ -872,11 +919,7 @@ const App: React.FC = () => {
                                 className="w-full bg-slate-900 border border-slate-600 text-white p-2 pl-3 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
                             />
                         </div>
-                        <p className="text-[10px] text-slate-400 mt-2">
-                           Ordered by frequency. Top item selected by default.
-                        </p>
                     </div>
-                    
                     <div className="overflow-y-auto flex-1 p-2 space-y-1 min-h-[200px]">
                         {filteredClassList.length === 0 && classSearchTerm.length > 0 ? (
                              <div className="flex flex-col items-center justify-center h-full text-slate-400 p-4">
@@ -929,7 +972,6 @@ const App: React.FC = () => {
                             })
                         )}
                     </div>
-                    
                     <div className="p-2 border-t border-slate-700 text-[10px] text-slate-500 flex justify-between px-4">
                         <span><b>↑/↓</b> to Navigate</span>
                         <span><b>Enter</b> to Confirm/Create</span>
@@ -937,6 +979,13 @@ const App: React.FC = () => {
                 </div>
             </div>
         )}
+        <ModelSettings 
+            isOpen={showModelSettings}
+            onClose={() => setShowModelSettings(false)}
+            config={inferenceConfig}
+            onConfigChange={setInferenceConfig}
+            isBackendConnected={backendConnected}
+        />
       </div>
     </div>
   );

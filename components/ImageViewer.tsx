@@ -84,7 +84,6 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
         e.stopPropagation(); 
         
         // Normalize deltaY across browsers
-        // Firefox uses Lines (1), others use Pixels (0)
         let delta = e.deltaY;
         if (e.deltaMode === 1) { // DOM_DELTA_LINE
             delta *= 33;
@@ -348,14 +347,16 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
             const width = label.w * 100;
             const height = label.h * 100;
             
-            // Pending Logic: Neutral White Color, Dashed Border
             const color = isPending ? 'white' : getColor(label.classId);
             const borderColor = color;
             const borderWidth = isSelected ? '3px' : '2px';
-            const borderStyle = isPending ? 'dashed' : 'solid';
+            const borderStyle = isPending ? 'dashed' : (label.isPredicted ? 'dotted' : 'solid'); 
             
             const opacityClass = isSelected ? 'opacity-100 z-50' : 'opacity-80 hover:opacity-100 z-10 hover:z-40';
             const shadow = isSelected && !isPending ? `0 0 0 2px white, 0 0 10px ${color}` : (isPending ? '0 0 10px rgba(255,255,255,0.5)' : 'none');
+            
+            // Special glow for model predictions
+            const modelGlow = label.isPredicted && !isSelected ? `0 0 8px ${color}` : shadow;
 
             return (
               <div
@@ -368,7 +369,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                   height: `${height}%`,
                 }}
               >
-                {/* Internal Fill (Visible when 'b' is pressed) */}
+                {/* Internal Fill */}
                 {showBoxFill && !isCreating && !isPending && (
                   <div 
                      onMouseDown={(e) => startResize(e, 'move', label, idx)}
@@ -381,22 +382,22 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                 <div 
                   onMouseDown={(e) => startResize(e, 'move', label, idx)}
                   className={`absolute top-0 left-0 w-full ${!isCreating && 'cursor-move pointer-events-auto'}`}
-                  style={{ height: borderWidth, backgroundColor: borderColor, borderTopStyle: borderStyle, boxShadow: shadow, transform: 'translateY(-50%)' }}
+                  style={{ height: borderWidth, backgroundColor: borderColor, borderTopStyle: borderStyle, boxShadow: modelGlow, transform: 'translateY(-50%)' }}
                 />
                 <div 
                   onMouseDown={(e) => startResize(e, 'move', label, idx)}
                   className={`absolute bottom-0 left-0 w-full ${!isCreating && 'cursor-move pointer-events-auto'}`}
-                  style={{ height: borderWidth, backgroundColor: borderColor, borderBottomStyle: borderStyle, boxShadow: shadow, transform: 'translateY(50%)' }}
+                  style={{ height: borderWidth, backgroundColor: borderColor, borderBottomStyle: borderStyle, boxShadow: modelGlow, transform: 'translateY(50%)' }}
                 />
                 <div 
                   onMouseDown={(e) => startResize(e, 'move', label, idx)}
                   className={`absolute top-0 left-0 h-full ${!isCreating && 'cursor-move pointer-events-auto'}`}
-                  style={{ width: borderWidth, backgroundColor: borderColor, borderLeftStyle: borderStyle, boxShadow: shadow, transform: 'translateX(-50%)' }}
+                  style={{ width: borderWidth, backgroundColor: borderColor, borderLeftStyle: borderStyle, boxShadow: modelGlow, transform: 'translateX(-50%)' }}
                 />
                 <div 
                   onMouseDown={(e) => startResize(e, 'move', label, idx)}
                   className={`absolute top-0 right-0 h-full ${!isCreating && 'cursor-move pointer-events-auto'}`}
-                  style={{ width: borderWidth, backgroundColor: borderColor, borderRightStyle: borderStyle, boxShadow: shadow, transform: 'translateX(50%)' }}
+                  style={{ width: borderWidth, backgroundColor: borderColor, borderRightStyle: borderStyle, boxShadow: modelGlow, transform: 'translateX(50%)' }}
                 />
 
                 {(isSelected || width > 0) && (
@@ -404,7 +405,12 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                     className={`absolute bottom-full left-0 mb-1 px-1.5 py-0.5 text-xs font-bold whitespace-nowrap rounded shadow-sm pointer-events-none transform origin-bottom-left ${isPending ? 'bg-white text-black' : 'bg-black/75 text-white'}`}
                     style={{ borderLeft: `4px solid ${color}` }}
                    >
-                     {isPending ? 'Pending Class...' : (classes[label.classId] || label.classId)}
+                     {isPending 
+                       ? 'Pending Class...' 
+                       : (label.isPredicted 
+                            ? `M-${classes[label.classId] || label.classId}` 
+                            : (classes[label.classId] || label.classId))
+                     }
                    </div>
                 )}
 
