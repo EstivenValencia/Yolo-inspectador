@@ -10,6 +10,7 @@ interface ImageViewerProps {
   classes: string[];
   isCreating?: boolean;
   showBoxFill?: boolean; // New prop for fill mode
+  labelsVisible?: boolean; // New prop for visibility toggle
   pendingLabelIndex?: number | null; // New prop for pending state
   onSelectLabel: (index: number) => void;
   onUpdateLabel: (label: YoloLabel, index?: number) => void;
@@ -25,6 +26,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
   classes,
   isCreating = false,
   showBoxFill = false,
+  labelsVisible = true,
   pendingLabelIndex = null,
   onSelectLabel,
   onUpdateLabel,
@@ -338,7 +340,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                 </div>
             )}
 
-          {labels.map((label, idx) => {
+          {labelsVisible && labels.map((label, idx) => {
             const isSelected = idx === currentLabelIndex;
             const isPending = idx === pendingLabelIndex;
             
@@ -357,6 +359,20 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
             
             // Special glow for model predictions
             const modelGlow = label.isPredicted && !isSelected ? `0 0 8px ${color}` : shadow;
+
+            // Generate Label Text
+            let labelText = '';
+            if (isPending) {
+                labelText = 'Pending Class...';
+            } else {
+                const className = classes[label.classId] || label.classId.toString();
+                if (label.isPredicted) {
+                    const conf = label.confidence ? Math.round(label.confidence * 100) + '%' : '';
+                    labelText = `M-${className} ${conf}`;
+                } else {
+                    labelText = className;
+                }
+            }
 
             return (
               <div
@@ -405,12 +421,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                     className={`absolute bottom-full left-0 mb-1 px-1.5 py-0.5 text-xs font-bold whitespace-nowrap rounded shadow-sm pointer-events-none transform origin-bottom-left ${isPending ? 'bg-white text-black' : 'bg-black/75 text-white'}`}
                     style={{ borderLeft: `4px solid ${color}` }}
                    >
-                     {isPending 
-                       ? 'Pending Class...' 
-                       : (label.isPredicted 
-                            ? `M-${classes[label.classId] || label.classId}` 
-                            : (classes[label.classId] || label.classId))
-                     }
+                     {labelText}
                    </div>
                 )}
 

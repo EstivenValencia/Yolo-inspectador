@@ -58,7 +58,8 @@ export const detectObjects = async (
             y: Number(item.y),
             w: Number(item.w),
             h: Number(item.h),
-            isPredicted: true
+            isPredicted: true,
+            confidence: item.confidence ? Number(item.confidence) : undefined
         }));
     }
     return [];
