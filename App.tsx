@@ -229,10 +229,12 @@ const App: React.FC = () => {
   }, [currentLabels.length]);
 
   // --- Core Update, Create & Save Logic ---
-  const handleLabelUpdate = (updatedLabel: YoloLabel) => {
+  const handleLabelUpdate = (updatedLabel: YoloLabel, index?: number) => {
+    const targetIdx = index !== undefined ? index : currentLabelIdx;
+
     const newLabels = [...currentLabels];
-    if (currentLabelIdx >= 0 && currentLabelIdx < newLabels.length) {
-        newLabels[currentLabelIdx] = updatedLabel;
+    if (targetIdx >= 0 && targetIdx < newLabels.length) {
+        newLabels[targetIdx] = updatedLabel;
         setCurrentLabels(newLabels);
         updateRawDataAndSave(newLabels);
     }

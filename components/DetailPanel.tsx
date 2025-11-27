@@ -12,7 +12,7 @@ interface DetailPanelProps {
   currentLabelIndex: number;
   onNextLabel: () => void;
   onPrevLabel: () => void;
-  onUpdateLabel: (updatedLabel: YoloLabel) => void;
+  onUpdateLabel: (updatedLabel: YoloLabel, index?: number) => void;
   onDeleteLabel: () => void;
   isCreating: boolean;
   onToggleCreateMode: () => void;

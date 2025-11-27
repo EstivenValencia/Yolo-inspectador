@@ -11,7 +11,7 @@ interface ImageViewerProps {
   isCreating?: boolean;
   showBoxFill?: boolean; // New prop for fill mode
   onSelectLabel: (index: number) => void;
-  onUpdateLabel: (label: YoloLabel) => void;
+  onUpdateLabel: (label: YoloLabel, index?: number) => void;
   onCreateLabel?: (label: YoloLabel) => void;
 }
 
@@ -46,12 +46,14 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
     transformX: number;
     transformY: number;
     label: YoloLabel;
+    index: number;
   }>({ 
     mouseX: 0, 
     mouseY: 0, 
     transformX: 0,
     transformY: 0,
-    label: { classId: 0, x: 0, y: 0, w: 0, h: 0 } 
+    label: { classId: 0, x: 0, y: 0, w: 0, h: 0 },
+    index: -1 
   });
 
   // Helper to force focus to this component
@@ -159,7 +161,8 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
       ...startDrag.current,
       mouseX: e.clientX,
       mouseY: e.clientY,
-      label: { ...label }
+      label: { ...label },
+      index: idx // IMPORTANT: Track the index explicitly to avoid race conditions
     };
   };
 
@@ -193,12 +196,13 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
         const deltaY = (e.clientY - startDrag.current.mouseY) / contentH;
 
         const start = startDrag.current.label;
+        const idx = startDrag.current.index;
         
         // CASE: MOVING (Drag the whole box via borders)
         if (resizing === 'move') {
             const newX = Math.max(0, Math.min(1, start.x + deltaX));
             const newY = Math.max(0, Math.min(1, start.y + deltaY));
-            onUpdateLabel({ ...start, x: newX, y: newY });
+            onUpdateLabel({ ...start, x: newX, y: newY }, idx);
             return;
         }
 
@@ -231,7 +235,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
         const newX = newLeft + newW / 2;
         const newY = newTop + newH / 2;
 
-        onUpdateLabel({ ...start, x: newX, y: newY, w: newW, h: newH });
+        onUpdateLabel({ ...start, x: newX, y: newY, w: newW, h: newH }, idx);
         return;
       }
 
@@ -330,8 +334,6 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
             {/* Guide Lines for Crosshair in Create Mode */}
             {isCreating && !creationStart && (
                 <div className="absolute inset-0 pointer-events-none">
-                    {/* Implemented via CSS cursor usually, but we could add SVG guides here if requested. 
-                        For now, standard crosshair cursor handles this well enough. */}
                 </div>
             )}
 
