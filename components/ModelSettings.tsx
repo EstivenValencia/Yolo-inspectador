@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Cpu, X, CheckCircle, AlertCircle, FolderOutput } from 'lucide-react';
+import { Cpu, X, CheckCircle, AlertCircle, FolderOutput, FolderPlus } from 'lucide-react';
 import { BackendConfig, checkBackendHealth } from '../utils/apiHelper';
 import { FileSystemDirectoryHandle } from '../types';
 
@@ -60,23 +60,28 @@ export const ModelSettings: React.FC<ModelSettingsProps> = ({
 
         <div className="space-y-6">
              {/* Output Folder Selection */}
-             <div className="bg-slate-900/30 p-4 rounded-lg border border-slate-700">
+             <div className="bg-slate-900/30 p-4 rounded-lg border border-slate-700 shadow-sm">
                 <label className="block text-sm font-bold text-slate-300 mb-2 flex items-center gap-2">
                     <FolderOutput size={16} className="text-purple-400" />
                     {t.modelSettings.outputFolder}
                 </label>
-                <p className="text-xs text-slate-500 mb-3">
+                <p className="text-xs text-slate-500 mb-3 leading-relaxed">
                    {t.modelSettings.outputDesc}
                 </p>
                 <div className="flex flex-col gap-2">
-                    <div className="text-xs text-slate-400 bg-slate-900 p-2 rounded border border-slate-800 break-all">
-                        <span className="font-bold text-slate-500 uppercase mr-2">{t.modelSettings.currentFolder}:</span>
-                        {modelOutputHandle ? modelOutputHandle.name : t.modelSettings.defaultFolder}
+                    <div className="text-xs text-slate-400 bg-slate-900 p-2 rounded border border-slate-800 break-all flex items-center justify-between">
+                        <div>
+                            <span className="font-bold text-slate-500 uppercase mr-2">{t.modelSettings.currentFolder}:</span>
+                            <span className={modelOutputHandle ? "text-purple-300 font-mono" : "text-slate-500 italic"}>
+                                {modelOutputHandle ? modelOutputHandle.name : t.modelSettings.defaultFolder}
+                            </span>
+                        </div>
                     </div>
                     <button 
                         onClick={handleSelectOutputFolder}
-                        className="bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded text-xs font-bold transition-colors border border-slate-600 self-start"
+                        className="flex items-center gap-2 bg-purple-900/40 hover:bg-purple-800 text-purple-200 px-4 py-2 rounded text-xs font-bold transition-colors border border-purple-800/50 self-start"
                     >
+                         <FolderPlus size={14} />
                         {t.modelSettings.selectFolder}
                     </button>
                 </div>
