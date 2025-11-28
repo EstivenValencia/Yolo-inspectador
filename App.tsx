@@ -934,6 +934,12 @@ const App: React.FC = () => {
              return;
         }
 
+        if (e.ctrlKey && key === 'f') {
+            e.preventDefault();
+            handleToggleReview();
+            return;
+        }
+
         if (showHelp) {
             if (key === 'escape') setShowHelp(false);
             return; 
@@ -1590,12 +1596,8 @@ const App: React.FC = () => {
                                 <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">R</span>
                             </div>
                              <div className="flex justify-between items-center text-sm">
-                                <span className="text-emerald-300 font-bold">{t.app.help.autoSingle}</span>
-                                <span className="font-mono bg-emerald-900/50 border border-emerald-500/50 px-2 py-1 rounded text-white">Z</span>
-                            </div>
-                             <div className="flex justify-between items-center text-sm">
-                                <span className="text-amber-300 font-bold">{t.app.help.confirmPred}</span>
-                                <span className="font-mono bg-amber-900/50 border border-amber-500/50 px-2 py-1 rounded text-white">Y</span>
+                                <span className="text-slate-300">{t.app.help.verifyLabel}</span>
+                                <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">Ctrl + F</span>
                             </div>
                         </div>
                         <div className="space-y-4">
@@ -1608,10 +1610,6 @@ const App: React.FC = () => {
                                 <span className="text-slate-300">{t.app.help.toggleModel}</span>
                                 <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">Ctrl + V</span>
                             </div>
-                            <div className="flex justify-between items-center text-sm">
-                                <span className="text-indigo-300 font-bold">{t.app.help.toggleAuto}</span>
-                                <span className="font-mono bg-indigo-900/50 border border-indigo-500/50 px-2 py-1 rounded text-white">Ctrl + Z</span>
-                            </div>
                              <div className="flex justify-between items-center text-sm">
                                 <span className="text-slate-300">{t.app.help.toggleFill}</span>
                                 <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">F</span>
@@ -1623,6 +1621,18 @@ const App: React.FC = () => {
                         </div>
                          <div className="space-y-4">
                              <h3 className="text-sm font-bold text-slate-400 uppercase border-b border-slate-700 pb-2">{t.app.help.genTitle}</h3>
+                              <div className="flex justify-between items-center text-sm">
+                                <span className="text-emerald-300 font-bold">{t.app.help.autoSingle}</span>
+                                <span className="font-mono bg-emerald-900/50 border border-emerald-500/50 px-2 py-1 rounded text-white">Z</span>
+                            </div>
+                            <div className="flex justify-between items-center text-sm">
+                                <span className="text-indigo-300 font-bold">{t.app.help.toggleAuto}</span>
+                                <span className="font-mono bg-indigo-900/50 border border-indigo-500/50 px-2 py-1 rounded text-white">Ctrl + Z</span>
+                            </div>
+                             <div className="flex justify-between items-center text-sm">
+                                <span className="text-amber-300 font-bold">{t.app.help.confirmPred}</span>
+                                <span className="font-mono bg-amber-900/50 border border-amber-500/50 px-2 py-1 rounded text-white">Y</span>
+                            </div>
                              <div className="flex justify-between items-center text-sm">
                                 <span className="text-slate-300">{t.app.help.toggleHelp}</span>
                                 <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">Ctrl + H</span>

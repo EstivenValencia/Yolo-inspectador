@@ -93,6 +93,7 @@ export const translations = {
         changeClass: "Change Class",
         autoSingle: "Auto-Detect (Single)",
         confirmPred: "Confirm Predictions",
+        verifyLabel: "Verify/Review Label",
         viewTitle: "View Controls",
         toggleManual: "Toggle Manual Labels",
         toggleModel: "Toggle Model Labels",
@@ -152,14 +153,14 @@ export const translations = {
       step3Content: "Master these shortcuts for speed:",
       shortcuts: {
         nav: "Navigation: A/D (Images), W/S (Defects)",
-        edit: "Editing: E (Create), Q (Delete), R (Change Class)",
+        edit: "Editing: E (Create), Q (Delete), R (Change Class), Ctrl+F (Verify)",
         view: "View: F (Fill Boxes), V (Toggle Labels), Ctrl+V (Toggle Model)",
-        model: "Model: Z (Run Inference), Ctrl+Z (Toggle Auto), Y (Accept)"
+        model: "Model: Z (Run Inference), Ctrl+Z (Auto), Y (Accept)"
       },
       step4Title: "Configuration",
       step4Content: "Use the 'Tools' menu to change visualization settings. Use 'Grid Settings' to adjust zoom levels and slideshow speed. Open 'Backend Settings' (Wifi Icon) to configure the Python backend parameters.",
       step5Title: "Output Folders",
-      step5Content: "By default, model predictions are saved to your main Labels folder (overwriting files). You can define a separate 'Output Folder' in the Backend Settings. If set, manual labels are read from the input source, but all saves (including model predictions) are written to this new folder, keeping your original dataset clean.",
+      step5Content: "By default, model predictions are saved to your main Labels folder (overwriting files). You can define a separate 'Output Folder' in the Backend Settings (Tools Menu). If set, manual labels are read from the input source, but all saves (including model predictions) are written to this new folder, keeping your original dataset clean.",
       next: "Next",
       back: "Back",
       close: "Close"
@@ -259,6 +260,7 @@ export const translations = {
         changeClass: "Cambiar Clase",
         autoSingle: "Auto-Detectar (Individual)",
         confirmPred: "Confirmar Predicciones",
+        verifyLabel: "Verificar/Revisar Etiqueta",
         viewTitle: "Controles de Vista",
         toggleManual: "Alternar Etiquetas Manuales",
         toggleModel: "Alternar Etiquetas Modelo",
@@ -318,7 +320,7 @@ export const translations = {
       step3Content: "Domina estos atajos para mayor velocidad:",
       shortcuts: {
         nav: "Navegación: A/D (Imágenes), W/S (Defectos)",
-        edit: "Edición: E (Crear), Q (Eliminar), R (Cambiar Clase)",
+        edit: "Edición: E (Crear), Q (Eliminar), R (Cambiar Clase), Ctrl+F (Verificar)",
         view: "Vista: F (Relleno), V (Etiquetas), Ctrl+V (Modelo)",
         model: "Modelo: Z (Inferencia), Ctrl+Z (Auto), Y (Aceptar)"
       },
