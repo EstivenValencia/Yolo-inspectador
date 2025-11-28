@@ -8,6 +8,8 @@ export interface YoloLabel {
   confidence?: number; // Prediction confidence score (0-1)
 }
 
+export type ReviewData = Record<string, string[]>; // Filename -> Array of LabelHashes
+
 // Define minimal interfaces for File System Access API
 export interface FileSystemHandle {
   kind: 'file' | 'directory';

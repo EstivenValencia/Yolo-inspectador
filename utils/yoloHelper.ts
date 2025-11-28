@@ -32,3 +32,9 @@ export const getColor = (index: number) => {
   // Saturation 95%, Lightness 60% for good visibility on dark UI
   return `hsl(${hue}, 95%, 60%)`;
 };
+
+export const getLabelHash = (l: YoloLabel) => {
+    // Generate a unique string signature for the label to track its review status
+    // independent of its array index (which changes on delete)
+    return `${l.classId}:${l.x.toFixed(6)}:${l.y.toFixed(6)}:${l.w.toFixed(6)}:${l.h.toFixed(6)}`;
+};

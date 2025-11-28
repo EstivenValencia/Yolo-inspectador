@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { YoloLabel, ImageAsset } from '../types';
-import { ChevronLeft, ChevronRight, AlertTriangle, Tag, MousePointerClick, Maximize2, Trash2, Info, Plus, ZoomIn } from 'lucide-react';
+import { ChevronLeft, ChevronRight, AlertTriangle, Tag, MousePointerClick, Maximize2, Trash2, Info, Plus, ZoomIn, CheckCircle } from 'lucide-react';
 import { getColor } from '../utils/yoloHelper';
 
 interface DetailPanelProps {
@@ -18,6 +18,9 @@ interface DetailPanelProps {
   onToggleCreateMode: () => void;
   zoomSettings: { context: number, mag: number };
   onZoomSettingsChange: (settings: { context: number, mag: number }) => void;
+  // Review Props
+  isReviewed: boolean;
+  onToggleReview: () => void;
   t: any;
 }
 
@@ -36,6 +39,8 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   onToggleCreateMode,
   zoomSettings,
   onZoomSettingsChange,
+  isReviewed,
+  onToggleReview,
   t
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -67,6 +72,9 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
 
     const imgW = imgElement.naturalWidth;
     const imgH = imgElement.naturalHeight;
+    
+    // Use Smart Zoom logic for the preview here as well? 
+    // The previous implementation was a simple crop. Let's keep it simple crop but respected context.
     
     const expansionFactor = 1.1 + (contextPadding / 100) * 4.0; 
 
@@ -216,7 +224,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
         <div 
             ref={zoomContainerRef}
             onMouseDown={handleMouseDown}
-            className={`w-full aspect-video bg-black/40 rounded-lg border border-slate-600 flex items-center justify-center overflow-hidden relative ${isPanning ? 'cursor-grabbing' : 'cursor-grab'}`}
+            className={`w-full aspect-video bg-black/40 rounded-lg border flex items-center justify-center overflow-hidden relative ${isPanning ? 'cursor-grabbing' : 'cursor-grab'} ${isReviewed ? 'border-emerald-500/50 ring-2 ring-emerald-500/20' : 'border-slate-600'}`}
         >
           <div 
              className="relative transition-transform duration-75 ease-out w-full h-full flex items-center justify-center"
@@ -228,6 +236,11 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                 style={{ imageRendering: 'pixelated' }} 
             />
           </div>
+          {isReviewed && (
+              <div className="absolute top-2 right-2 bg-emerald-600 text-white text-xs font-bold px-2 py-1 rounded-full shadow-lg flex items-center gap-1">
+                  <CheckCircle size={12} /> Reviewed
+              </div>
+          )}
         </div>
         
         <div className="flex justify-between gap-2 mt-1">
@@ -266,22 +279,32 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
             <Tag size={16} />
             {t.detail.editClass}
           </label>
-          <div className="relative">
-            <select
-              value={currentLabel?.classId || 0}
-              onChange={(e) => currentLabel && onUpdateLabel({ ...currentLabel, classId: parseInt(e.target.value) })}
-              className="w-full bg-slate-800 border-2 border-slate-600 text-white p-3 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none appearance-none cursor-pointer text-lg font-medium shadow-inner"
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+                <select
+                value={currentLabel?.classId || 0}
+                onChange={(e) => currentLabel && onUpdateLabel({ ...currentLabel, classId: parseInt(e.target.value) })}
+                className="w-full bg-slate-800 border-2 border-slate-600 text-white p-3 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none appearance-none cursor-pointer text-lg font-medium shadow-inner"
+                >
+                {classes.map((cls, idx) => (
+                    <option key={idx} value={idx}>
+                    {idx}: {cls}
+                    </option>
+                ))}
+                </select>
+                <div 
+                className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full border border-white/20 shadow-sm"
+                style={{ backgroundColor: getColor(currentLabel?.classId || 0) }}
+                />
+            </div>
+            
+            <button 
+                onClick={onToggleReview}
+                className={`p-3 rounded-lg border-2 transition-all ${isReviewed ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-slate-800 border-slate-600 text-slate-500 hover:border-slate-400'}`}
+                title="Mark as Reviewed"
             >
-              {classes.map((cls, idx) => (
-                <option key={idx} value={idx}>
-                  {idx}: {cls}
-                </option>
-              ))}
-            </select>
-            <div 
-              className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full border border-white/20 shadow-sm"
-              style={{ backgroundColor: getColor(currentLabel?.classId || 0) }}
-            />
+                <CheckCircle size={24} />
+            </button>
           </div>
           <p className="text-[10px] text-slate-500 mt-2 text-right">{t.detail.quickSelect}</p>
         </div>

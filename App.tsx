@@ -4,8 +4,8 @@ import { ImageViewer } from './components/ImageViewer';
 import { DetailPanel } from './components/DetailPanel';
 import { ModelSettings } from './components/ModelSettings';
 import { GridView } from './components/GridView';
-import { ImageAsset, YoloLabel, FileSystemFileHandle, FileSystemDirectoryHandle } from './types';
-import { parseYoloString, serializeYoloString } from './utils/yoloHelper';
+import { ImageAsset, YoloLabel, FileSystemFileHandle, FileSystemDirectoryHandle, ReviewData } from './types';
+import { parseYoloString, serializeYoloString, getLabelHash } from './utils/yoloHelper';
 import { detectObjects, BackendConfig, checkBackendHealth } from './utils/apiHelper';
 import { translations } from './utils/translations';
 import { ArrowLeft, ArrowRight, Image as ImageIcon, Filter, CheckCircle, Save, PlusSquare, BoxSelect, Home, Search, Keyboard, X, PlusCircle, Wifi, WifiOff, FileCheck, Loader2, Wrench, Eye, EyeOff, ChevronDown, Grid, Square, Settings, LayoutGrid, Zap, ZapOff, Sliders, ZoomIn, Clock, Bot } from 'lucide-react';
@@ -37,6 +37,10 @@ const App: React.FC = () => {
   const [classes, setClasses] = useState<string[]>([]);
   const [classFileHandle, setClassFileHandle] = useState<FileSystemFileHandle | null>(null);
   
+  // Review System State
+  const [reviewedLabels, setReviewedLabels] = useState<Set<string>>(new Set()); // Set of "filename:hash"
+  const [reviewsFileHandle, setReviewsFileHandle] = useState<FileSystemFileHandle | null>(null);
+
   // View State
   const [currentImageIdx, setCurrentImageIdx] = useState(0);
   const [currentLabelIdx, setCurrentLabelIdx] = useState(0);
@@ -140,7 +144,51 @@ const App: React.FC = () => {
   
   const [pendingLabelIndex, setPendingLabelIndex] = useState<number | null>(null);
 
-  const handleSetupComplete = (
+  const loadReviewsFile = async (dirHandle: FileSystemDirectoryHandle) => {
+      try {
+          const fileHandle = await dirHandle.getFileHandle('reviews.json', { create: true });
+          setReviewsFileHandle(fileHandle);
+          const file = await fileHandle.getFile();
+          const text = await file.text();
+          if (text.trim()) {
+              const data: ReviewData = JSON.parse(text);
+              const newSet = new Set<string>();
+              Object.entries(data).forEach(([filename, hashes]) => {
+                  hashes.forEach(h => newSet.add(`${filename}:${h}`));
+              });
+              setReviewedLabels(newSet);
+          } else {
+              setReviewedLabels(new Set());
+          }
+      } catch (e) {
+          console.warn("Could not load reviews.json", e);
+          // Fallback to empty if it fails
+          setReviewedLabels(new Set());
+      }
+  };
+
+  const saveReviewsFile = async (newSet: Set<string>) => {
+      if (!reviewsFileHandle) return;
+      try {
+          // Reconstruct object from Set
+          const data: ReviewData = {};
+          newSet.forEach(item => {
+              const [filename, hash] = item.split(':');
+              if (hash) { // simple validation
+                  if (!data[filename]) data[filename] = [];
+                  data[filename].push(hash);
+              }
+          });
+
+          const writable = await reviewsFileHandle.createWritable();
+          await writable.write(JSON.stringify(data, null, 2));
+          await writable.close();
+      } catch (e) {
+          console.error("Failed to save reviews.json", e);
+      }
+  };
+
+  const handleSetupComplete = async (
     loadedImages: ImageAsset[], 
     loadedLabels: Map<string, string>, 
     loadedLabelHandles: Map<string, FileSystemFileHandle>,
@@ -157,7 +205,12 @@ const App: React.FC = () => {
     setIsSetup(true);
     setCurrentImageIdx(0);
     setPredictionsCache(new Map());
-    setModelOutputHandle(null); // Reset custom output on new load
+    setModelOutputHandle(null); 
+    
+    // Load reviews
+    if (dirHandle) {
+        await loadReviewsFile(dirHandle);
+    }
   };
 
   const handleHome = () => {
@@ -168,8 +221,47 @@ const App: React.FC = () => {
           setPredictionsCache(new Map());
           setCurrentLabels([]);
           setIsBatchActive(false);
+          setReviewedLabels(new Set());
       }
   };
+
+  // --- SHORTCUTS LOGIC ---
+  // Attempt to override browser shortcuts aggressively
+  useEffect(() => {
+    const overrideCtrlT = (e: KeyboardEvent) => {
+        if (e.ctrlKey && e.key.toLowerCase() === 't') {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            console.log("Ctrl+T Intercepted");
+            
+            // Trigger logic manually since React state might be stale in this raw listener
+            // Ideally we dispatch a custom event or use a ref, but let's trust the React listener below handles the logic
+            // if we preventDefault here.
+            // Actually, we need to trigger the logic here if we stop propagation.
+            const event = new CustomEvent('app:toggle-inference');
+            window.dispatchEvent(event);
+        }
+    };
+    
+    // Use capture phase
+    window.addEventListener('keydown', overrideCtrlT, { capture: true });
+    return () => window.removeEventListener('keydown', overrideCtrlT, { capture: true });
+  }, []);
+  
+  // Listener for custom event dispatched by raw handler
+  useEffect(() => {
+      const handleToggleInference = () => {
+          if (backendConnected) {
+             setIsBatchActive(prev => !prev);
+          } else {
+             setShowModelSettings(true);
+          }
+      };
+      window.addEventListener('app:toggle-inference', handleToggleInference);
+      return () => window.removeEventListener('app:toggle-inference', handleToggleInference);
+  }, [backendConnected]);
+  // -------------------------
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -331,12 +423,37 @@ const App: React.FC = () => {
     setCurrentLabelIdx(prev => (prev - 1 + currentLabels.length) % currentLabels.length);
   }, [currentLabels.length]);
 
+  const handleToggleReview = () => {
+      const img = filteredImages[currentImageIdx];
+      const label = currentLabels[currentLabelIdx];
+      if (!img || !label) return;
+
+      const imgKey = img.name.replace(/\.[^/.]+$/, "");
+      const hash = getLabelHash(label);
+      const fullKey = `${imgKey}:${hash}`;
+
+      const newSet = new Set(reviewedLabels);
+      if (newSet.has(fullKey)) {
+          newSet.delete(fullKey);
+      } else {
+          newSet.add(fullKey);
+      }
+      setReviewedLabels(newSet);
+      saveReviewsFile(newSet); // Persist
+  };
+
   const handleLabelUpdate = (updatedLabel: YoloLabel, index?: number) => {
     const targetIdx = index !== undefined ? index : currentLabelIdx;
 
     const newLabels = [...currentLabels];
     if (targetIdx >= 0 && targetIdx < newLabels.length) {
-        const oldClassId = newLabels[targetIdx].classId;
+        const oldLabel = newLabels[targetIdx];
+        const oldClassId = oldLabel.classId;
+        
+        // If label geometry/class changed, we should probably un-review it because the signature changes
+        // The signature changes automatically, so it effectively un-reviews.
+        // We could explicitly remove the old hash, but leaving it as orphan in the JSON is harmless for now.
+        
         if (oldClassId !== updatedLabel.classId) {
             const className = classes[updatedLabel.classId];
             if (className) recordClassUsage(className);
@@ -610,19 +727,7 @@ const App: React.FC = () => {
     if (!isSetup) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-        if (e.ctrlKey && e.key.toLowerCase() === 't') {
-             e.preventDefault();
-             e.stopPropagation();
-             e.stopImmediatePropagation();
-             
-             if (backendConnected) {
-                 setIsBatchActive(prev => !prev);
-             } else {
-                 setShowModelSettings(true);
-             }
-             return false;
-        }
-
+        // ... Logic continues below
         if (showClassSelector || showGridConfig || showBatchSettings) {
             if (e.key === 'Escape') {
                 e.preventDefault();
@@ -764,6 +869,7 @@ const App: React.FC = () => {
                     e.preventDefault();
                     handleRunInference();
                 }
+                // Ctrl+T handled by raw listener
                 break;
             
             case 'y': 
@@ -1260,6 +1366,7 @@ const App: React.FC = () => {
                         slideshowSettings={{ interval: gridConfig.interval, isPlaying: gridConfig.isPlaying }}
                         showModelLabels={showModelLabels}
                         labelsVisible={labelsVisible}
+                        reviewedLabels={reviewedLabels}
                         t={t}
                     />
                 ) : (
@@ -1300,6 +1407,8 @@ const App: React.FC = () => {
                             onToggleCreateMode={() => setIsCreating(prev => !prev)}
                             zoomSettings={zoomSettings}
                             onZoomSettingsChange={setZoomSettings}
+                            isReviewed={currentLabels[currentLabelIdx] ? reviewedLabels.has(`${currentImage.name.replace(/\.[^/.]+$/, "")}:${getLabelHash(currentLabels[currentLabelIdx])}`) : false}
+                            onToggleReview={handleToggleReview}
                             t={t}
                         />
                     </>

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { ImageAsset, YoloLabel } from '../types';
-import { parseYoloString, getColor } from '../utils/yoloHelper';
-import { Maximize2, ChevronLeft, ChevronRight, Pause } from 'lucide-react';
+import { parseYoloString, getColor, getLabelHash } from '../utils/yoloHelper';
+import { Maximize2, ChevronLeft, ChevronRight, Pause, CheckCircle } from 'lucide-react';
 
 interface GridViewProps {
   images: ImageAsset[];
@@ -19,6 +19,7 @@ interface GridViewProps {
   slideshowSettings: { interval: number, isPlaying: boolean };
   showModelLabels?: boolean;
   labelsVisible?: boolean;
+  reviewedLabels: Set<string>; // Set of "filename:hash"
   t: any;
 }
 
@@ -47,61 +48,93 @@ const ZoomCell: React.FC<{
         const imgW = imgElement.naturalWidth;
         const imgH = imgElement.naturalHeight;
         
-        const expansionFactor = 1.1 + (zoomSettings.context / 100) * 4.0; 
-        let cropW = label.w * expansionFactor;
-        let cropH = label.h * expansionFactor;
+        // --- SMART ZOOM LOGIC ---
+        // 1. Calculate the bounding box of the label + context in image coordinates (0-1)
+        // context is % padding added to the label's size.
+        const contextFactor = 1 + (zoomSettings.context / 100);
+        
+        let roiW = label.w * contextFactor;
+        let roiH = label.h * contextFactor;
 
-        const targetAspectRatio = 1; 
-        const currentAspectRatio = (cropW * imgW) / (cropH * imgH);
-
-        if (currentAspectRatio > targetAspectRatio) {
-            const newHeightPx = (cropW * imgW) / targetAspectRatio;
-            cropH = newHeightPx / imgH;
+        // 2. We want to fit this ROI into a square (1:1) canvas (or the shape of the grid cell).
+        // To fill the square without stretching, we need to extend the ROI to be square.
+        // If the defect is wide, we increase height. If tall, we increase width.
+        // This ensures the defect is fully visible and centered.
+        
+        if (roiW > roiH) {
+            roiH = roiW; // Make it square based on width
         } else {
-            const newWidthPx = (cropH * imgH) * targetAspectRatio;
-            cropW = newWidthPx / imgW;
+            roiW = roiH; // Make it square based on height
         }
         
-        const cLeft = Math.max(0, label.x - cropW / 2);
-        const cTop = Math.max(0, label.y - cropH / 2);
+        // 3. Convert normalized ROI to pixels
+        let pxW = roiW * imgW;
+        let pxH = roiH * imgH;
         
-        const finalW = Math.min(cropW, 1 - cLeft); 
-        const finalH = Math.min(cropH, 1 - cTop);
+        // 4. Center the ROI on the label
+        let pxX = (label.x * imgW) - (pxW / 2);
+        let pxY = (label.y * imgH) - (pxH / 2);
 
-        const pxLeft = cLeft * imgW;
-        const pxTop = cTop * imgH;
-        const pxWidth = finalW * imgW;
-        const pxHeight = finalH * imgH;
+        // 5. Draw
+        // Set canvas resolution high enough for crisp rendering
+        const canvasSize = 300; 
+        canvasRef.current.width = canvasSize;
+        canvasRef.current.height = canvasSize;
         
-        canvasRef.current.width = Math.max(1, pxWidth);
-        canvasRef.current.height = Math.max(1, pxHeight);
-        
-        ctx.clearRect(0, 0, pxWidth, pxHeight);
-        ctx.drawImage(imgElement, pxLeft, pxTop, pxWidth, pxHeight, 0, 0, pxWidth, pxHeight);
+        // Clear background (optional, but good for transparency)
+        ctx.fillStyle = '#0f172a'; // Slate-900 background
+        ctx.fillRect(0,0, canvasSize, canvasSize);
 
-        const boxX = (label.x * imgW) - (label.w * imgW) / 2 - pxLeft;
-        const boxY = (label.y * imgH) - (label.h * imgH) / 2 - pxTop;
-        const boxW = label.w * imgW;
-        const boxH = label.h * imgH;
+        // Draw the image slice. 
+        // drawImage handles clipping if source coords are outside the image naturally.
+        ctx.drawImage(
+            imgElement, 
+            pxX, pxY, pxW, pxH,  // Source: The calculated square ROI
+            0, 0, canvasSize, canvasSize // Dest: The whole canvas
+        );
+
+        // 6. Draw the Bounding Box
+        // We need to map the label's original coordinates into our new canvas space
+        // The ROI (pxX, pxY, pxW, pxH) maps to (0, 0, canvasSize, canvasSize)
+        
+        const labelPxX = (label.x * imgW); // Center X in Image Px
+        const labelPxY = (label.y * imgH); // Center Y in Image Px
+        const labelPxW = (label.w * imgW);
+        const labelPxH = (label.h * imgH);
+
+        // Relative to ROI Top-Left
+        const relX = labelPxX - pxX;
+        const relY = labelPxY - pxY;
+
+        // Scale factor from ROI Px to Canvas Px
+        const scaleX = canvasSize / pxW;
+        const scaleY = canvasSize / pxH;
+
+        const drawX = (relX - labelPxW/2) * scaleX;
+        const drawY = (relY - labelPxH/2) * scaleY;
+        const drawW = labelPxW * scaleX;
+        const drawH = labelPxH * scaleY;
 
         ctx.strokeStyle = getColor(label.classId);
-        ctx.lineWidth = Math.max(2, Math.min(pxWidth, pxHeight) / 50); 
+        ctx.lineWidth = 3; 
         
-        if (label.isPredicted) ctx.setLineDash([ctx.lineWidth * 2, ctx.lineWidth * 2]);
+        if (label.isPredicted) ctx.setLineDash([6, 6]);
         else ctx.setLineDash([]);
         
-        ctx.strokeRect(boxX, boxY, boxW, boxH);
+        ctx.strokeRect(drawX, drawY, drawW, drawH);
 
     }, [label, imgElement, zoomSettings]);
 
     return (
-        <div className={`${className} flex items-center justify-center bg-black overflow-hidden`}>
+        <div className={`${className} flex items-center justify-center bg-black overflow-hidden relative`}>
+             {/* Scale Transform for manual magnification on top of the auto-fit */}
             <canvas 
                 ref={canvasRef} 
-                className="max-w-full max-h-full object-contain"
+                className="w-full h-full object-contain"
                 style={{ 
                     imageRendering: 'pixelated',
-                    transform: `scale(${zoomSettings.mag})`
+                    transform: `scale(${zoomSettings.mag})`,
+                    transformOrigin: 'center center'
                 }} 
             />
         </div>
@@ -123,6 +156,7 @@ export const GridView: React.FC<GridViewProps> = ({
   slideshowSettings,
   showModelLabels = true,
   labelsVisible = true,
+  reviewedLabels,
   t
 }) => {
   const itemsPerPage = rows * cols;
@@ -187,16 +221,24 @@ export const GridView: React.FC<GridViewProps> = ({
     const globalIdx = startIdx + relativeIdx;
     
     const allLabels = getRelevantLabels(img);
+    const imgKey = img.name.replace(/\.[^/.]+$/, "");
 
     const isSelected = globalIdx === currentIndex;
     const activeLabelIdx = activeLabelIndices[globalIdx] || 0;
     const safeLabelIdx = activeLabelIdx < allLabels.length ? activeLabelIdx : 0;
     const currentLabel = allLabels[safeLabelIdx];
 
+    // Check review status
+    const isReviewed = currentLabel ? reviewedLabels.has(`${imgKey}:${getLabelHash(currentLabel)}`) : false;
+
     if (gridMode === 'zoom') {
         const labelText = currentLabel 
             ? `${currentLabel.isPredicted ? 'M-' : ''}${classes[currentLabel.classId] || currentLabel.classId}` 
             : '';
+
+        // Border color based on review status
+        const borderColor = isReviewed ? 'border-emerald-500' : (isSelected ? 'border-indigo-500' : 'border-slate-700');
+        const borderRing = isReviewed ? 'ring-2 ring-emerald-500/50' : (isSelected ? 'ring-2 ring-indigo-500/50' : '');
 
         return (
             <div 
@@ -204,7 +246,7 @@ export const GridView: React.FC<GridViewProps> = ({
                 onClick={() => onImageClick(globalIdx)}
                 onMouseEnter={() => setHoveredIndex(globalIdx)}
                 onMouseLeave={() => setHoveredIndex(null)}
-                className={`relative bg-slate-900 border-2 rounded overflow-hidden cursor-pointer group transition-all ${isSelected ? 'border-indigo-500 ring-2 ring-indigo-500/50' : 'border-slate-700 hover:border-slate-500'}`}
+                className={`relative bg-slate-900 border-4 rounded-lg overflow-hidden cursor-pointer group transition-all ${borderColor} ${borderRing}`}
             >
                 {currentLabel ? (
                     <ZoomCell 
@@ -214,23 +256,28 @@ export const GridView: React.FC<GridViewProps> = ({
                         className="w-full h-full"
                     />
                 ) : (
-                   <img src={img.url} className="w-full h-full object-contain opacity-50" />
+                   <div className="w-full h-full flex items-center justify-center bg-slate-950">
+                        <img src={img.url} className="w-full h-full object-contain opacity-30" />
+                   </div>
                 )}
 
-                <div className="absolute top-0 left-0 right-0 bg-black/40 p-1 flex justify-between items-center z-20 pointer-events-none">
-                    <span className="text-[10px] text-white font-mono bg-black/50 px-1 rounded truncate max-w-[60%]">{img.name}</span>
-                     {currentLabel && (
-                         <span 
-                            className="text-[10px] font-bold px-1.5 rounded"
-                            style={{ 
-                                backgroundColor: getColor(currentLabel.classId),
-                                color: 'white',
-                                textShadow: '0 1px 2px black'
-                             }}
-                         >
-                             {labelText}
-                         </span>
-                     )}
+                <div className="absolute top-0 left-0 right-0 bg-black/40 p-1 flex justify-between items-start z-20 pointer-events-none">
+                     <div className="flex flex-col gap-0.5">
+                        <span className="text-[10px] text-white font-mono bg-black/50 px-1 rounded truncate max-w-[80px]">{img.name}</span>
+                        {currentLabel && (
+                            <span 
+                                className="text-[10px] font-bold px-1.5 rounded self-start"
+                                style={{ 
+                                    backgroundColor: getColor(currentLabel.classId),
+                                    color: 'white',
+                                    textShadow: '0 1px 2px black'
+                                }}
+                            >
+                                {labelText}
+                            </span>
+                        )}
+                     </div>
+                     {isReviewed && <CheckCircle size={16} className="text-emerald-400 bg-black/50 rounded-full" />}
                 </div>
                 
                 {allLabels.length > 1 && hoveredIndex === globalIdx && (
@@ -260,6 +307,7 @@ export const GridView: React.FC<GridViewProps> = ({
         );
     }
 
+    // NORMAL MODE
     return (
       <div 
         key={globalIdx}
@@ -280,6 +328,7 @@ export const GridView: React.FC<GridViewProps> = ({
                 const opacity = label.isPredicted ? 0.8 : 0.9;
                 const className = classes[label.classId] || String(label.classId);
                 const displayName = label.isPredicted ? `M-${className}` : className;
+                const labelReviewed = reviewedLabels.has(`${imgKey}:${getLabelHash(label)}`);
 
                 return (
                     <React.Fragment key={i}>
@@ -290,25 +339,26 @@ export const GridView: React.FC<GridViewProps> = ({
                                 top: `${(label.y - label.h / 2) * 100}%`,
                                 width: `${label.w * 100}%`,
                                 height: `${label.h * 100}%`,
-                                borderColor: color,
+                                borderColor: labelReviewed ? '#34d399' : color, // Emerald if reviewed
                                 borderStyle: borderStyle,
-                                borderWidth: '3px',
+                                borderWidth: labelReviewed ? '4px' : '3px',
                                 opacity: opacity,
                                 boxShadow: label.isPredicted ? `0 0 6px ${color}` : 'none'
                             }}
                         />
                          <div 
-                            className="absolute text-[10px] font-bold px-1 py-0.5 rounded-sm truncate max-w-full"
+                            className="absolute text-[10px] font-bold px-1 py-0.5 rounded-sm truncate max-w-full flex items-center gap-1"
                             style={{
                                 left: `${(label.x - label.w / 2) * 100}%`,
                                 top: `${((label.y - label.h / 2) * 100) - 15}%`,
-                                backgroundColor: color,
+                                backgroundColor: labelReviewed ? '#065f46' : color,
                                 color: 'white',
                                 textShadow: '0 1px 2px rgba(0,0,0,0.8)',
                                 transform: 'translateY(-50%)',
                                 zIndex: 10
                             }}
                         >
+                            {labelReviewed && <CheckCircle size={8} />}
                             {displayName} {label.confidence ? `${Math.round(label.confidence * 100)}%` : ''}
                         </div>
                     </React.Fragment>
