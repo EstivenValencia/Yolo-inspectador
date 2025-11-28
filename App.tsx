@@ -27,7 +27,10 @@ const App: React.FC = () => {
   // Data State
   const [images, setImages] = useState<ImageAsset[]>([]);
   const [labelsRaw, setLabelsRaw] = useState<Map<string, string>>(new Map());
-  // Predictions Cache
+  // New State for Model Folder Content
+  const [modelLabelsRaw, setModelLabelsRaw] = useState<Map<string, string>>(new Map());
+
+  // Predictions Cache (RAM only, until saved)
   const [predictionsCache, setPredictionsCache] = useState<Map<string, YoloLabel[]>>(new Map());
   
   const [labelHandles, setLabelHandles] = useState<Map<string, FileSystemFileHandle>>(new Map());
@@ -148,6 +151,35 @@ const App: React.FC = () => {
   
   const [pendingLabelIndex, setPendingLabelIndex] = useState<number | null>(null);
 
+  // --- LOGIC TO SCAN MODEL FOLDER ---
+  const scanModelFolder = async (dirHandle: FileSystemDirectoryHandle) => {
+      const newMap = new Map<string, string>();
+      try {
+          for await (const entry of dirHandle.values()) {
+            if (entry.kind === 'file' && entry.name.endsWith('.txt')) {
+                const fileHandle = entry as FileSystemFileHandle;
+                const file = await fileHandle.getFile();
+                const text = await file.text();
+                const key = entry.name.replace(/\.[^/.]+$/, "");
+                newMap.set(key, text);
+            }
+          }
+          setModelLabelsRaw(newMap);
+      } catch (e) {
+          console.error("Error scanning model folder", e);
+      }
+  };
+
+  const handleModelOutputChange = async (handle: FileSystemDirectoryHandle | null) => {
+      setModelOutputHandle(handle);
+      if (handle) {
+          await scanModelFolder(handle);
+      } else {
+          setModelLabelsRaw(new Map());
+      }
+  };
+  // ----------------------------------
+
   const loadReviewsFile = async (dirHandle: FileSystemDirectoryHandle) => {
       try {
           const fileHandle = await dirHandle.getFileHandle('reviews.json', { create: true });
@@ -210,6 +242,7 @@ const App: React.FC = () => {
     setCurrentImageIdx(0);
     setPredictionsCache(new Map());
     setModelOutputHandle(null); 
+    setModelLabelsRaw(new Map());
     setSkippedImages(new Set());
     setFailureCounts(new Map());
     
@@ -224,6 +257,7 @@ const App: React.FC = () => {
           setIsSetup(false);
           setImages([]);
           setLabelsRaw(new Map());
+          setModelLabelsRaw(new Map());
           setPredictionsCache(new Map());
           setCurrentLabels([]);
           setIsBatchActive(false);
@@ -237,7 +271,6 @@ const App: React.FC = () => {
   // Attempt to override browser shortcuts aggressively
   useEffect(() => {
     const overrideCtrlZ = (e: KeyboardEvent) => {
-        // Changed from Ctrl+T to Ctrl+Z as requested
         if (e.ctrlKey && e.key.toLowerCase() === 'z') {
             e.preventDefault();
             e.stopPropagation();
@@ -360,10 +393,33 @@ const App: React.FC = () => {
     if (!img) return;
 
     const key = img.name.replace(/\.[^/.]+$/, "");
-    const rawContent = labelsRaw.get(key) || "";
-    const savedLabels = parseYoloString(rawContent);
+    
+    // 1. Get Manual Labels (Original Folder)
+    const rawManual = labelsRaw.get(key) || "";
+    const manualLabels = parseYoloString(rawManual).map(l => ({ ...l, isPredicted: false }));
+    
+    // 2. Get Model Labels (Model Folder - if separate)
+    let modelLabelsFromDisk: YoloLabel[] = [];
+    if (modelOutputHandle) {
+        const rawModel = modelLabelsRaw.get(key) || "";
+        modelLabelsFromDisk = parseYoloString(rawModel).map(l => ({ ...l, isPredicted: true }));
+    }
+
+    // 3. Get RAM Cache (Latest Predictions)
+    // Note: If we just saved, the cache is cleared for this image.
     const cachedPredictions = predictionsCache.get(key) || [];
-    const mergedLabels = [...savedLabels, ...cachedPredictions];
+
+    // Combine: Manual + ModelDisk + RAM
+    // Note: RAM predictions usually supersede disk predictions if they exist for the same image (new run).
+    // But here we'll just append. If logic requires RAM to replace Disk Model labels, we can check.
+    // For now, let's assume if RAM cache exists, we use it INSTEAD of disk model labels, to avoid duplicates if we haven't saved yet.
+    
+    let effectiveModelLabels = modelLabelsFromDisk;
+    if (cachedPredictions.length > 0) {
+        effectiveModelLabels = cachedPredictions;
+    }
+
+    const mergedLabels = [...manualLabels, ...effectiveModelLabels];
     
     setCurrentLabels(mergedLabels);
     setPendingLabelIndex(null); 
@@ -389,7 +445,7 @@ const App: React.FC = () => {
     }
     
     setLastSaveStatus('idle');
-  }, [currentImageIdx, filteredImages, labelsRaw, predictionsCache, isSetup, filterClassId]);
+  }, [currentImageIdx, filteredImages, labelsRaw, modelLabelsRaw, predictionsCache, isSetup, filterClassId, modelOutputHandle]);
 
 
   const handlePageChange = (direction: 'next' | 'prev') => {
@@ -454,10 +510,6 @@ const App: React.FC = () => {
     if (targetIdx >= 0 && targetIdx < newLabels.length) {
         const oldLabel = newLabels[targetIdx];
         const oldClassId = oldLabel.classId;
-        
-        // If label geometry/class changed, we should probably un-review it because the signature changes
-        // The signature changes automatically, so it effectively un-reviews.
-        // We could explicitly remove the old hash, but leaving it as orphan in the JSON is harmless for now.
         
         if (oldClassId !== updatedLabel.classId) {
             const className = classes[updatedLabel.classId];
@@ -645,7 +697,8 @@ const App: React.FC = () => {
       });
 
       setCurrentLabels(newLabels);
-      updateRawDataAndSave(newLabels, true); 
+      // Force save predictions is false because we just converted them to manual!
+      updateRawDataAndSave(newLabels, false); 
   };
 
   const cancelPendingLabel = () => {
@@ -693,9 +746,8 @@ const App: React.FC = () => {
               setCurrentLabelIdx(-1);
           }
           
-          if (!labelToDelete.isPredicted) {
-              updateRawDataAndSave(newLabels);
-          }
+          // Save changes (Delete applies to both types)
+          updateRawDataAndSave(newLabels);
       }
   };
 
@@ -703,53 +755,69 @@ const App: React.FC = () => {
       if (!filteredImages[currentImageIdx]) return;
 
       const imgKey = filteredImages[currentImageIdx].name.replace(/\.[^/.]+$/, "");
-      
-      const labelsToSave = forceSavePredictions 
-        ? newLabels 
-        : newLabels.filter(l => !l.isPredicted);
-
-      const newRaw = serializeYoloString(labelsToSave);
-      
-      const newLabelsMap = new Map(labelsRaw);
-      newLabelsMap.set(imgKey, newRaw);
-      setLabelsRaw(newLabelsMap);
-
       setLastSaveStatus('saving');
-      try {
-        let handle = labelHandles.get(imgKey);
-        // Custom Logic: If modelOutputHandle is set, use that folder instead of original
-        let targetDirHandle = modelOutputHandle || labelsDirHandle;
 
-        if (modelOutputHandle) {
-             // If we are using a custom output folder, we must ensure we are writing to it.
-             // We can't use the handle from `labelHandles` map because that might point to the original input folder.
-             // We must attempt to get the file handle from the modelOutputHandle.
-             handle = undefined; 
-        }
+      // SPLIT LABELS
+      const manualLabels = newLabels.filter(l => !l.isPredicted);
+      const predictedLabels = newLabels.filter(l => l.isPredicted);
+
+      try {
+        // 1. SAVE MANUAL LABELS (Always to Original Folder)
+        const newManualRaw = serializeYoloString(manualLabels);
         
-        if (!handle && targetDirHandle) {
-             handle = await targetDirHandle.getFileHandle(`${imgKey}.txt`, { create: true });
-             // We don't update the global labelHandles map if we are using modelOutputHandle, 
-             // because that might confuse loading logic for other files? 
-             // Actually, the app loads from the Input folder.
-             // If we write to Output folder, we are technically creating a split dataset.
-             // But for the purpose of this session, if we create it, we can cache it.
-             if (!modelOutputHandle) {
-                 const newHandles = new Map(labelHandles);
-                 newHandles.set(imgKey, handle);
-                 setLabelHandles(newHandles);
+        // Update State
+        const newLabelsMap = new Map(labelsRaw);
+        newLabelsMap.set(imgKey, newManualRaw);
+        setLabelsRaw(newLabelsMap);
+        
+        let manualHandle = labelHandles.get(imgKey);
+        // Create if doesn't exist in original folder
+        if (!manualHandle && labelsDirHandle) {
+            manualHandle = await labelsDirHandle.getFileHandle(`${imgKey}.txt`, { create: true });
+            const newHandles = new Map(labelHandles);
+            newHandles.set(imgKey, manualHandle);
+            setLabelHandles(newHandles);
+        }
+
+        if (manualHandle) {
+             const writable = await manualHandle.createWritable();
+             await writable.write(newManualRaw);
+             await writable.close();
+        }
+
+        // 2. SAVE PREDICTED LABELS (To Model Folder if exists, otherwise overwrite Manual)
+        if (modelOutputHandle) {
+             // If we have a separate model folder, save predictions there
+             const newModelRaw = serializeYoloString(predictedLabels);
+             
+             // Update State
+             const newModelMap = new Map(modelLabelsRaw);
+             newModelMap.set(imgKey, newModelRaw);
+             setModelLabelsRaw(newModelMap);
+
+             const modelFileHandle = await modelOutputHandle.getFileHandle(`${imgKey}.txt`, { create: true });
+             const writable = await modelFileHandle.createWritable();
+             await writable.write(newModelRaw);
+             await writable.close();
+
+        } else if (forceSavePredictions || predictedLabels.length > 0) {
+             // If NO separate model folder is defined, but we have predictions we want to save (e.g. mixed),
+             // The standard behavior is usually to mix them.
+             // But the user specific request says: "If this option is not defined, it overwrites the manual folder files"
+             // In this case, we merge them and save to manual handle.
+             const mergedRaw = serializeYoloString([...manualLabels, ...predictedLabels]);
+             if (manualHandle) {
+                 const writable = await manualHandle.createWritable();
+                 await writable.write(mergedRaw);
+                 await writable.close();
+                 // Update state to reflect merged
+                 newLabelsMap.set(imgKey, mergedRaw);
+                 setLabelsRaw(newLabelsMap);
              }
         }
-
-        if (handle) {
-            const writable = await handle.createWritable();
-            await writable.write(newRaw);
-            await writable.close();
-            setLastSaveStatus('saved');
-            setTimeout(() => setLastSaveStatus('idle'), 1500);
-        } else {
-            setLastSaveStatus('error');
-        }
+        
+        setLastSaveStatus('saved');
+        setTimeout(() => setLastSaveStatus('idle'), 1500);
 
       } catch (err: any) {
           console.error("Failed to save to disk:", err);
@@ -1660,7 +1728,7 @@ const App: React.FC = () => {
             onConfigChange={setInferenceConfig}
             isBackendConnected={backendConnected}
             modelOutputHandle={modelOutputHandle}
-            onModelOutputHandleChange={setModelOutputHandle}
+            onModelOutputHandleChange={handleModelOutputChange}
             t={t}
         />
       </div>

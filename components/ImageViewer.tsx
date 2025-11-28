@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { YoloLabel, ImageAsset } from '../types';
-import { getColor } from '../utils/yoloHelper';
+import { getColor, getModelColor } from '../utils/yoloHelper';
 import { RotateCcw } from 'lucide-react';
 
 interface ImageViewerProps {
@@ -358,10 +358,13 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
             const width = label.w * 100;
             const height = label.h * 100;
             
-            const color = isPending ? 'white' : getColor(label.classId);
+            // USE DIFFERENT COLORS FOR MODEL VS MANUAL
+            const color = isPending ? 'white' : (label.isPredicted ? getModelColor(label.classId) : getColor(label.classId));
             const borderColor = color;
             const borderWidth = isSelected ? '3px' : '2px';
-            const borderStyle = isPending ? 'dashed' : (label.isPredicted ? 'dotted' : 'solid'); 
+            
+            // DASHED FOR MODEL, SOLID FOR MANUAL
+            const borderStyle = isPending ? 'dashed' : (label.isPredicted ? 'dashed' : 'solid'); 
             
             const opacityClass = isSelected ? 'opacity-100 z-50' : 'opacity-80 hover:opacity-100 z-10 hover:z-40';
             const shadow = isSelected && !isPending ? `0 0 0 2px white, 0 0 10px ${color}` : (isPending ? '0 0 10px rgba(255,255,255,0.5)' : 'none');
@@ -427,8 +430,15 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
 
                 {(isSelected || width > 0) && (
                    <div 
-                    className={`absolute bottom-full left-0 mb-1 px-1.5 py-0.5 text-xs font-bold whitespace-nowrap rounded shadow-sm pointer-events-none transform origin-bottom-left ${isPending ? 'bg-white text-black' : 'bg-black/75 text-white'}`}
-                    style={{ borderLeft: `4px solid ${color}` }}
+                    className={`absolute left-0 px-1.5 py-0.5 text-xs font-bold whitespace-nowrap rounded shadow-sm pointer-events-none transform ${isPending ? 'bg-white text-black' : 'bg-black/75 text-white'}`}
+                    style={{ 
+                        borderLeft: `4px solid ${color}`,
+                        // POSITION LOGIC: MANUAL ON TOP, MODEL ON BOTTOM
+                        ...(label.isPredicted 
+                            ? { top: '100%', marginTop: '4px', origin: 'top left' } 
+                            : { bottom: '100%', marginBottom: '4px', origin: 'bottom left' }
+                        )
+                    }}
                    >
                      {labelText}
                    </div>
