@@ -228,25 +228,22 @@ const App: React.FC = () => {
   // --- SHORTCUTS LOGIC ---
   // Attempt to override browser shortcuts aggressively
   useEffect(() => {
-    const overrideCtrlT = (e: KeyboardEvent) => {
-        if (e.ctrlKey && e.key.toLowerCase() === 't') {
+    const overrideCtrlZ = (e: KeyboardEvent) => {
+        // Changed from Ctrl+T to Ctrl+Z as requested
+        if (e.ctrlKey && e.key.toLowerCase() === 'z') {
             e.preventDefault();
             e.stopPropagation();
             e.stopImmediatePropagation();
-            console.log("Ctrl+T Intercepted");
+            console.log("Ctrl+Z Intercepted");
             
-            // Trigger logic manually since React state might be stale in this raw listener
-            // Ideally we dispatch a custom event or use a ref, but let's trust the React listener below handles the logic
-            // if we preventDefault here.
-            // Actually, we need to trigger the logic here if we stop propagation.
             const event = new CustomEvent('app:toggle-inference');
             window.dispatchEvent(event);
         }
     };
     
     // Use capture phase
-    window.addEventListener('keydown', overrideCtrlT, { capture: true });
-    return () => window.removeEventListener('keydown', overrideCtrlT, { capture: true });
+    window.addEventListener('keydown', overrideCtrlZ, { capture: true });
+    return () => window.removeEventListener('keydown', overrideCtrlZ, { capture: true });
   }, []);
   
   // Listener for custom event dispatched by raw handler
@@ -864,12 +861,13 @@ const App: React.FC = () => {
                 setShowBoxFill(prev => !prev);
                 break;
             
-            case 't': 
+            // Changed from T to Z as requested
+            case 'z': 
                 if (!e.ctrlKey) { 
                     e.preventDefault();
                     handleRunInference();
                 }
-                // Ctrl+T handled by raw listener
+                // Ctrl+Z handled by raw listener
                 break;
             
             case 'y': 
@@ -1420,7 +1418,7 @@ const App: React.FC = () => {
                 <div className="bg-slate-800 border border-slate-600 rounded-xl shadow-2xl max-w-2xl w-full p-6" onClick={e => e.stopPropagation()}>
                     <div className="flex justify-between items-center mb-6">
                         <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-                            <Keyboard className="text-indigo-400" /> Keyboard Shortcuts
+                            <Keyboard className="text-indigo-400" /> {t.app.shortcutsTitle || "Keyboard Shortcuts"}
                         </h2>
                         <button onClick={() => setShowHelp(false)} className="text-slate-400 hover:text-white">
                             <X size={24} />
@@ -1454,7 +1452,7 @@ const App: React.FC = () => {
                             </div>
                              <div className="flex justify-between items-center text-sm">
                                 <span className="text-emerald-300 font-bold">Auto-Detect (Single)</span>
-                                <span className="font-mono bg-emerald-900/50 border border-emerald-500/50 px-2 py-1 rounded text-white">T</span>
+                                <span className="font-mono bg-emerald-900/50 border border-emerald-500/50 px-2 py-1 rounded text-white">Z</span>
                             </div>
                              <div className="flex justify-between items-center text-sm">
                                 <span className="text-amber-300 font-bold">Confirm Predictions</span>
@@ -1473,7 +1471,7 @@ const App: React.FC = () => {
                             </div>
                             <div className="flex justify-between items-center text-sm">
                                 <span className="text-indigo-300 font-bold">Toggle Auto-Detect</span>
-                                <span className="font-mono bg-indigo-900/50 border border-indigo-500/50 px-2 py-1 rounded text-white">Ctrl + T</span>
+                                <span className="font-mono bg-indigo-900/50 border border-indigo-500/50 px-2 py-1 rounded text-white">Ctrl + Z</span>
                             </div>
                              <div className="flex justify-between items-center text-sm">
                                 <span className="text-slate-300">Toggle Box Fill</span>

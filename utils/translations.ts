@@ -48,6 +48,7 @@ export const translations = {
       panZoomInfo: "Ctrl + Scroll to Zoom • Drag to Pan",
       filterAll: "All Defects",
       filterUnlabeled: "Unlabeled Images",
+      shortcutsTitle: "Keyboard Shortcuts",
       toolsMenu: {
         visualization: "Visualization",
         hideManual: "Hide Manual",
@@ -111,9 +112,9 @@ export const translations = {
       overlapW: "Overlap Width Ratio",
       overlapH: "Overlap Height Ratio",
       outputFolder: "Output Folder for Predictions",
-      outputDesc: "If selected, accepted predictions (Y) are saved here instead of the original Labels folder.",
+      outputDesc: "This folder can be different from your manual labels folder. If NOT selected, it overwrites the manual labels folder.",
       currentFolder: "Current",
-      defaultFolder: "Default (Original Labels Folder)",
+      defaultFolder: "Default (Overwrites Manual Folder)",
       selectFolder: "Select Output Folder",
       instructions: "Run python backend.py in your terminal.",
       close: "Close"
@@ -130,12 +131,12 @@ export const translations = {
         nav: "Navigation: A/D (Images), W/S (Defects)",
         edit: "Editing: E (Create), Q (Delete), R (Change Class)",
         view: "View: F (Fill Boxes), V (Toggle Labels), Ctrl+V (Toggle Model)",
-        model: "Model: T (Run Inference), Y (Save/Accept Prediction)"
+        model: "Model: Z (Run Inference), Ctrl+Z (Toggle Auto), Y (Accept)"
       },
       step4Title: "Configuration",
-      step4Content: "Use the 'Tools' menu to change visualization settings. Use 'Grid Settings' to adjust zoom levels and slideshow speed. Open 'Backend Settings' (Wifi Icon) to configure the Python backend or change the save folder.",
+      step4Content: "Use the 'Tools' menu to change visualization settings. Use 'Grid Settings' to adjust zoom levels and slideshow speed. Open 'Backend Settings' (Wifi Icon) to configure the Python backend parameters.",
       step5Title: "Output Folders",
-      step5Content: "By default, accepted predictions are merged into your original labels folder. You can change this in the Model Settings to save new labels to a separate directory.",
+      step5Content: "You can define a separate folder to save the model's accepted predictions in the Model Settings. If you do not define a specific output folder, the application will overwrite the files in your manual labels folder.",
       next: "Next",
       back: "Back",
       close: "Close"
@@ -190,6 +191,7 @@ export const translations = {
       panZoomInfo: "Ctrl + Scroll para Zoom • Arrastra para Mover",
       filterAll: "Todos los Defectos",
       filterUnlabeled: "Imágenes sin Etiquetar",
+      shortcutsTitle: "Atajos de Teclado",
       toolsMenu: {
         visualization: "Visualización",
         hideManual: "Ocultar Manual",
@@ -253,9 +255,9 @@ export const translations = {
       overlapW: "Ratio Solapamiento Ancho",
       overlapH: "Ratio Solapamiento Alto",
       outputFolder: "Carpeta de Salida (Predicciones)",
-      outputDesc: "Si se selecciona, las predicciones aceptadas (Y) se guardan aquí en lugar de la carpeta original.",
+      outputDesc: "Esta carpeta puede ser diferente a la carpeta de etiquetas manuales. Si NO se selecciona, sobrescribe la carpeta manual.",
       currentFolder: "Actual",
-      defaultFolder: "Por Defecto (Carpeta Labels Original)",
+      defaultFolder: "Por Defecto (Sobrescribe Manual)",
       selectFolder: "Seleccionar Carpeta",
       instructions: "Ejecuta python backend.py en tu terminal.",
       close: "Cerrar"
@@ -272,12 +274,12 @@ export const translations = {
         nav: "Navegación: A/D (Imágenes), W/S (Defectos)",
         edit: "Edición: E (Crear), Q (Eliminar), R (Cambiar Clase)",
         view: "Vista: F (Relleno), V (Etiquetas), Ctrl+V (Modelo)",
-        model: "Modelo: T (Inferencia), Y (Guardar/Aceptar Predicción)"
+        model: "Modelo: Z (Inferencia), Ctrl+Z (Auto), Y (Aceptar)"
       },
       step4Title: "Configuración",
-      step4Content: "Usa el menú 'Herr.' para opciones visuales. Usa 'Config. Matriz' para ajustar zoom y velocidad. Abre 'Config. Backend' (Icono Wifi) para configurar el backend Python o cambiar la carpeta de guardado.",
+      step4Content: "Usa el menú 'Herr.' para opciones visuales. Usa 'Config. Matriz' para ajustar zoom y velocidad. Abre 'Config. Backend' (Icono Wifi) para configurar los parámetros del backend Python.",
       step5Title: "Carpetas de Salida",
-      step5Content: "Por defecto, las predicciones aceptadas se mezclan en tu carpeta de etiquetas original. Puedes cambiar esto en la Configuración del Modelo para guardar nuevas etiquetas en un directorio separado.",
+      step5Content: "Puedes definir una carpeta separada para guardar las predicciones aceptadas por el modelo en la Configuración del Modelo. Si no defines una carpeta de salida específica, la aplicación sobrescribirá los archivos en tu carpeta de etiquetas manuales.",
       next: "Siguiente",
       back: "Atrás",
       close: "Cerrar"
