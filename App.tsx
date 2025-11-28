@@ -8,7 +8,7 @@ import { ImageAsset, YoloLabel, FileSystemFileHandle, FileSystemDirectoryHandle,
 import { parseYoloString, serializeYoloString, getLabelHash } from './utils/yoloHelper';
 import { detectObjects, BackendConfig, checkBackendHealth } from './utils/apiHelper';
 import { translations } from './utils/translations';
-import { ArrowLeft, ArrowRight, Image as ImageIcon, Filter, CheckCircle, Save, PlusSquare, BoxSelect, Home, Search, Keyboard, X, PlusCircle, Wifi, WifiOff, FileCheck, Loader2, Wrench, Eye, EyeOff, ChevronDown, Grid, Square, Settings, LayoutGrid, Zap, ZapOff, Sliders, ZoomIn, Clock, Bot } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Image as ImageIcon, Filter, CheckCircle, Save, PlusSquare, BoxSelect, Home, Search, Keyboard, X, PlusCircle, Wifi, WifiOff, FileCheck, Loader2, Wrench, Eye, EyeOff, ChevronDown, Grid, Square, Settings, LayoutGrid, Zap, ZapOff, Sliders, ZoomIn, Clock, Bot, FolderOutput } from 'lucide-react';
 
 const App: React.FC = () => {
   // Localization State
@@ -1310,7 +1310,7 @@ const App: React.FC = () => {
                                  <span className="ml-auto text-[10px] bg-slate-900 px-1 rounded text-slate-500">F</span>
                              </button>
                         </div>
-                        <div className="p-2">
+                        <div className="p-2 border-b border-slate-700">
                             <span className="text-[10px] text-slate-500 uppercase font-bold px-2">{t.app.toolsMenu.actions}</span>
                             <button 
                                 onClick={() => {
@@ -1323,6 +1323,19 @@ const App: React.FC = () => {
                                 <span>{isCreating ? t.app.toolsMenu.stopCreating : t.app.toolsMenu.createLabel}</span>
                                 <span className="ml-auto text-[10px] bg-slate-900 px-1 rounded text-slate-500">E</span>
                             </button>
+                        </div>
+                        <div className="p-2">
+                             <span className="text-[10px] text-slate-500 uppercase font-bold px-2">{t.app.toolsMenu.config}</span>
+                             <button 
+                                onClick={() => {
+                                    setShowModelSettings(true);
+                                    setShowToolsMenu(false);
+                                }}
+                                className="w-full text-left px-2 py-2 mt-1 hover:bg-slate-700 rounded flex items-center gap-2 text-sm text-slate-200"
+                             >
+                                 <FolderOutput size={14} className="text-purple-400" />
+                                 <span>{t.app.toolsMenu.outputFolder}</span>
+                             </button>
                         </div>
                     </div>
                 )}

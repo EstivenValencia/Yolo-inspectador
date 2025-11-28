@@ -59,7 +59,9 @@ export const translations = {
         outlineOnly: "Outline Only",
         actions: "Actions",
         stopCreating: "Stop Creating",
-        createLabel: "Create Label"
+        createLabel: "Create Label",
+        config: "Configuration",
+        outputFolder: "Model Output Folder"
       },
       grid: {
         layout: "Layout",
@@ -137,6 +139,7 @@ export const translations = {
       defaultFolder: "Default (Overwrites Manual Folder)",
       selectFolder: "Select Output Folder",
       instructions: "Run python backend.py in your terminal.",
+      pressZ: "Press Z to detect.",
       close: "Close"
     },
     tutorial: {
@@ -156,7 +159,7 @@ export const translations = {
       step4Title: "Configuration",
       step4Content: "Use the 'Tools' menu to change visualization settings. Use 'Grid Settings' to adjust zoom levels and slideshow speed. Open 'Backend Settings' (Wifi Icon) to configure the Python backend parameters.",
       step5Title: "Output Folders",
-      step5Content: "The folder for saving model labels can be different from the manual labels folder. If this option is not defined, it overwrites the manual folder files.",
+      step5Content: "By default, model predictions are saved to your main Labels folder (overwriting files). You can define a separate 'Output Folder' in the Backend Settings. If set, manual labels are read from the input source, but all saves (including model predictions) are written to this new folder, keeping your original dataset clean.",
       next: "Next",
       back: "Back",
       close: "Close"
@@ -222,7 +225,9 @@ export const translations = {
         outlineOnly: "Solo Bordes",
         actions: "Acciones",
         stopCreating: "Dejar de Crear",
-        createLabel: "Crear Etiqueta"
+        createLabel: "Crear Etiqueta",
+        config: "Configuración",
+        outputFolder: "Carpeta Salida Modelo"
       },
       grid: {
         layout: "Diseño",
@@ -295,11 +300,12 @@ export const translations = {
       overlapW: "Ratio Solapamiento Ancho",
       overlapH: "Ratio Solapamiento Alto",
       outputFolder: "Carpeta de Salida (Predicciones)",
-      outputDesc: "La carpeta para guardar las etiquetas del modelo puede ser diferente a la carpeta de etiquetas que yo defino manualmente, si no defino esta opcion se sobreescribe a las propias de la parte manual, pero pueden ser carpetas diferentes, yo lo puedo hacer en configuraciones. Se más especifico con el manual.",
+      outputDesc: "La carpeta para guardar las etiquetas del modelo puede ser diferente a la carpeta de etiquetas que yo defino manualmente. Si no defines esta opción, se sobrescriben las manuales. Puedes definir carpetas diferentes en esta configuración.",
       currentFolder: "Actual",
       defaultFolder: "Por Defecto (Sobrescribe Manual)",
       selectFolder: "Seleccionar Carpeta",
       instructions: "Ejecuta python backend.py en tu terminal.",
+      pressZ: "Presiona Z para detectar.",
       close: "Cerrar"
     },
     tutorial: {
@@ -319,7 +325,7 @@ export const translations = {
       step4Title: "Configuración",
       step4Content: "Usa el menú 'Herr.' para opciones visuales. Usa 'Config. Matriz' para ajustar zoom y velocidad. Abre 'Config. Backend' (Icono Wifi) para configurar los parámetros del backend Python.",
       step5Title: "Carpetas de Salida",
-      step5Content: "La carpeta para guardar las etiquetas del modelo puede ser diferente a la carpeta de etiquetas que yo defino manualmente, si no defino esta opcion se sobreescribe a las propias de la parte manual, pero pueden ser carpetas diferentes, yo lo puedo hacer en configuraciones. Se más especifico con el manual.",
+      step5Content: "Por defecto, las predicciones del modelo se guardan en tu carpeta de Etiquetas principal (sobrescribiendo archivos). Puedes definir una 'Carpeta de Salida' separada en la Configuración del Backend. Si se define, las etiquetas manuales se leen de la fuente original, pero todos los guardados (incluyendo predicciones) se escriben en esta nueva carpeta, manteniendo tu dataset original intacto.",
       next: "Siguiente",
       back: "Atrás",
       close: "Cerrar"

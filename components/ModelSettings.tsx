@@ -209,7 +209,7 @@ export const ModelSettings: React.FC<ModelSettingsProps> = ({
 
             <div className="bg-slate-900/50 p-3 rounded text-xs text-slate-400">
                 <p>{t.modelSettings.instructions}</p>
-                <p className="mt-1">Press <kbd className="bg-slate-700 text-white px-1 rounded">Z</kbd> to detect.</p>
+                <p className="mt-1">{t.modelSettings.pressZ}</p>
             </div>
             
             <div className="flex justify-end">
