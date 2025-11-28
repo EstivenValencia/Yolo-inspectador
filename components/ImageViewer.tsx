@@ -278,13 +278,15 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
   }, [resizing, isPanning, transform, onUpdateLabel, isCreating, creationStart, ghostBox, onCreateLabel]);
 
   // --- DYNAMIC SCALING CALCULATIONS ---
-  // To solve the issue where clicking lines is hard when zoomed out,
+  // To solve the issue where clicking lines is hard when zoomed out/in,
   // we calculate sizes that are inversely proportional to scale.
   // This ensures a "constant screen size" for handles and hit areas.
   const scaleFactor = transform.scale;
   
-  // Hit area should be roughly 15px on screen regardless of zoom
-  const hitAreaSize = Math.max(0.001, 15 / scaleFactor); 
+  // Hit area should be roughly 20px on screen regardless of zoom
+  // We divide by scaleFactor because these pixels are inside the scaled container.
+  // 20px (screen) / scale = Xpx (internal)
+  const hitAreaSize = 20 / scaleFactor; 
   
   // Visual border width: 2px on screen normal, 3px selected
   const visualBorderBase = 2 / scaleFactor;
@@ -293,6 +295,10 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
   // Handles: 10px on screen
   const handleSize = 10 / scaleFactor;
   const handleOffset = -(handleSize / 2);
+
+  // Use a nearly transparent color for hit areas to ensure they capture events 
+  // even in gaps of dashed lines or when backgrounds are technically transparent.
+  const hitAreaColor = 'rgba(255, 255, 255, 0.01)';
 
   return (
     <div 
@@ -393,7 +399,12 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                 )}
 
                 {/* --- BORDERS (HIT AREAS & VISUALS) --- */}
-                {/* We use a solid transparent border for hitting, and an inner border for visuals */}
+                {/* 
+                   We use a container div as the HIT AREA. 
+                   It has a very slight background color to ensure it captures mouse events 
+                   even if the inner line is dashed/dotted and has gaps.
+                   Inverse scaling (hitW) ensures it's always easy to grab.
+                */}
                 
                 {/* TOP */}
                 <div 
@@ -403,7 +414,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                       height: hitW, 
                       transform: 'translateY(-50%)', 
                       zIndex: 20,
-                      backgroundColor: 'rgba(255,255,255,0.01)' // Catch click
+                      backgroundColor: hitAreaColor
                   }}
                 >
                     <div className="w-full" style={{ 
@@ -421,7 +432,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                       height: hitW, 
                       transform: 'translateY(50%)', 
                       zIndex: 20,
-                      backgroundColor: 'rgba(255,255,255,0.01)'
+                      backgroundColor: hitAreaColor
                   }}
                 >
                     <div className="w-full" style={{ 
@@ -439,7 +450,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                       width: hitW, 
                       transform: 'translateX(-50%)', 
                       zIndex: 20,
-                      backgroundColor: 'rgba(255,255,255,0.01)'
+                      backgroundColor: hitAreaColor
                   }}
                 >
                     <div className="h-full" style={{ 
@@ -457,7 +468,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                       width: hitW, 
                       transform: 'translateX(50%)', 
                       zIndex: 20,
-                      backgroundColor: 'rgba(255,255,255,0.01)'
+                      backgroundColor: hitAreaColor
                   }}
                 >
                     <div className="h-full" style={{ 
@@ -467,10 +478,11 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                     }} />
                 </div>
 
-                {/* LABEL TAG */}
+                {/* LABEL TAG - Made Interactive (Click to Move) */}
                 {(isSelected || width > 0) && (
                    <div 
-                    className={`absolute left-0 font-bold whitespace-nowrap rounded shadow-sm pointer-events-none transform ${isPending ? 'bg-white text-black' : 'bg-black/75 text-white'}`}
+                    onMouseDown={(e) => startResize(e, 'move', label, idx)}
+                    className={`absolute left-0 font-bold whitespace-nowrap rounded shadow-sm pointer-events-auto cursor-pointer transform hover:scale-105 transition-transform ${isPending ? 'bg-white text-black' : 'bg-black/75 text-white'}`}
                     style={{ 
                         fontSize: `${12 / scaleFactor}px`, // Scale text so it doesn't get huge/tiny
                         padding: `${2 / scaleFactor}px ${6 / scaleFactor}px`,
@@ -488,31 +500,31 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                 {/* RESIZE HANDLES (Corners and Edges) - Only when selected and not pending */}
                 {isSelected && !isPending && (
                   <>
-                    <div className="absolute bg-white border border-black cursor-nwse-resize z-50 rounded-sm pointer-events-auto shadow-sm"
+                    <div className="absolute bg-white border border-black cursor-nwse-resize z-50 rounded-sm pointer-events-auto shadow-sm hover:scale-125 transition-transform"
                          style={{ top: handleOffset, left: handleOffset, width: handleSize, height: handleSize }}
                          onMouseDown={(e) => startResize(e, 'tl', label, idx)} />
-                    <div className="absolute bg-white border border-black cursor-nesw-resize z-50 rounded-sm pointer-events-auto shadow-sm"
+                    <div className="absolute bg-white border border-black cursor-nesw-resize z-50 rounded-sm pointer-events-auto shadow-sm hover:scale-125 transition-transform"
                          style={{ top: handleOffset, right: handleOffset, width: handleSize, height: handleSize }}
                          onMouseDown={(e) => startResize(e, 'tr', label, idx)} />
-                    <div className="absolute bg-white border border-black cursor-nesw-resize z-50 rounded-sm pointer-events-auto shadow-sm"
+                    <div className="absolute bg-white border border-black cursor-nesw-resize z-50 rounded-sm pointer-events-auto shadow-sm hover:scale-125 transition-transform"
                          style={{ bottom: handleOffset, left: handleOffset, width: handleSize, height: handleSize }}
                          onMouseDown={(e) => startResize(e, 'bl', label, idx)} />
-                    <div className="absolute bg-white border border-black cursor-nwse-resize z-50 rounded-sm pointer-events-auto shadow-sm"
+                    <div className="absolute bg-white border border-black cursor-nwse-resize z-50 rounded-sm pointer-events-auto shadow-sm hover:scale-125 transition-transform"
                          style={{ bottom: handleOffset, right: handleOffset, width: handleSize, height: handleSize }}
                          onMouseDown={(e) => startResize(e, 'br', label, idx)} />
                     
-                    {/* Edge Resizers */}
+                    {/* Edge Resizers - Use hitW for easy gripping */}
                     <div className="absolute top-0 left-1/2 -translate-x-1/2 cursor-ns-resize z-50 pointer-events-auto"
-                         style={{ width: '50%', height: hitW, transform: 'translateY(-50%)' }}
+                         style={{ width: '50%', height: hitW, transform: 'translateY(-50%)', backgroundColor: hitAreaColor }}
                          onMouseDown={(e) => startResize(e, 't', label, idx)} />
                     <div className="absolute bottom-0 left-1/2 -translate-x-1/2 cursor-ns-resize z-50 pointer-events-auto"
-                         style={{ width: '50%', height: hitW, transform: 'translateY(50%)' }}
+                         style={{ width: '50%', height: hitW, transform: 'translateY(50%)', backgroundColor: hitAreaColor }}
                          onMouseDown={(e) => startResize(e, 'b', label, idx)} />
                     <div className="absolute left-0 top-1/2 -translate-y-1/2 cursor-ew-resize z-50 pointer-events-auto"
-                         style={{ height: '50%', width: hitW, transform: 'translateX(-50%)' }}
+                         style={{ height: '50%', width: hitW, transform: 'translateX(-50%)', backgroundColor: hitAreaColor }}
                          onMouseDown={(e) => startResize(e, 'l', label, idx)} />
                     <div className="absolute right-0 top-1/2 -translate-y-1/2 cursor-ew-resize z-50 pointer-events-auto"
-                         style={{ height: '50%', width: hitW, transform: 'translateX(50%)' }}
+                         style={{ height: '50%', width: hitW, transform: 'translateX(50%)', backgroundColor: hitAreaColor }}
                          onMouseDown={(e) => startResize(e, 'r', label, idx)} />
                   </>
                 )}
