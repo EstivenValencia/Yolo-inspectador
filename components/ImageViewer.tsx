@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { YoloLabel, ImageAsset } from '../types';
 import { getColor } from '../utils/yoloHelper';
@@ -9,9 +10,10 @@ interface ImageViewerProps {
   currentLabelIndex: number;
   classes: string[];
   isCreating?: boolean;
-  showBoxFill?: boolean; // New prop for fill mode
-  labelsVisible?: boolean; // New prop for visibility toggle
-  pendingLabelIndex?: number | null; // New prop for pending state
+  showBoxFill?: boolean; 
+  labelsVisible?: boolean; 
+  showModelLabels?: boolean; // New Prop
+  pendingLabelIndex?: number | null; 
   onSelectLabel: (index: number) => void;
   onUpdateLabel: (label: YoloLabel, index?: number) => void;
   onCreateLabel?: (label: YoloLabel) => void;
@@ -27,6 +29,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
   isCreating = false,
   showBoxFill = false,
   labelsVisible = true,
+  showModelLabels = true,
   pendingLabelIndex = null,
   onSelectLabel,
   onUpdateLabel,
@@ -340,7 +343,11 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                 </div>
             )}
 
-          {labelsVisible && labels.map((label, idx) => {
+          {labels.map((label, idx) => {
+            // Visibility Check
+            if (label.isPredicted && !showModelLabels) return null;
+            if (!label.isPredicted && !labelsVisible) return null;
+
             const isSelected = idx === currentLabelIndex;
             const isPending = idx === pendingLabelIndex;
             

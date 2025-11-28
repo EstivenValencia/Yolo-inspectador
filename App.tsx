@@ -8,7 +8,7 @@ import { GridView } from './components/GridView';
 import { ImageAsset, YoloLabel, FileSystemFileHandle, FileSystemDirectoryHandle } from './types';
 import { parseYoloString, serializeYoloString } from './utils/yoloHelper';
 import { detectObjects, BackendConfig, checkBackendHealth } from './utils/apiHelper';
-import { ArrowLeft, ArrowRight, Image as ImageIcon, Filter, CheckCircle, Save, PlusSquare, BoxSelect, Home, Search, Keyboard, X, PlusCircle, Wifi, WifiOff, FileCheck, Loader2, Wrench, Eye, EyeOff, ChevronDown, Grid, Square, Settings, LayoutGrid, Zap, ZapOff, Sliders, ZoomIn, Clock } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Image as ImageIcon, Filter, CheckCircle, Save, PlusSquare, BoxSelect, Home, Search, Keyboard, X, PlusCircle, Wifi, WifiOff, FileCheck, Loader2, Wrench, Eye, EyeOff, ChevronDown, Grid, Square, Settings, LayoutGrid, Zap, ZapOff, Sliders, ZoomIn, Clock, Bot } from 'lucide-react';
 
 const App: React.FC = () => {
   const [isSetup, setIsSetup] = useState(false);
@@ -117,7 +117,8 @@ const App: React.FC = () => {
   // Modes
   const [isCreating, setIsCreating] = useState(false); // Creation Mode (Key: e)
   const [showBoxFill, setShowBoxFill] = useState(false); // Box Fill Mode (Key: f)
-  const [labelsVisible, setLabelsVisible] = useState(true); // Toggle Visibility (Ctrl + T)
+  const [labelsVisible, setLabelsVisible] = useState(true); // Toggle Visibility (Key: V or Ctrl + B)
+  const [showModelLabels, setShowModelLabels] = useState(true); // Toggle Model Labels (Key: Ctrl + V)
   const [showHelp, setShowHelp] = useState(false); // Help Modal (Key: Ctrl+H)
   const [showToolsMenu, setShowToolsMenu] = useState(false); // Tools Dropdown
   
@@ -487,10 +488,14 @@ const App: React.FC = () => {
 
 
   const handleAcceptPredictions = () => {
-      const hasPredictions = currentLabels.some(l => l.isPredicted);
-      if (!hasPredictions) return;
-
+      // Logic applies to CURRENT IMAGE index (works for single and grid selected)
       const currentImg = filteredImages[currentImageIdx];
+      if (!currentImg) return;
+      
+      const hasPredictions = currentLabels.some(l => l.isPredicted);
+      // Even if no predictions on current labels array (maybe hidden?), we check logic
+      // Actually we should only save what is visible/active in currentLabels state
+      
       const key = currentImg.name.replace(/\.[^/.]+$/, "");
 
       // 1. Convert predictions to real labels
@@ -634,6 +639,20 @@ const App: React.FC = () => {
     if (!isSetup) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+        // Special Handling for Ctrl + T (Capture Phase attempt)
+        if (e.ctrlKey && e.key.toLowerCase() === 't') {
+             e.preventDefault();
+             e.stopPropagation();
+             e.stopImmediatePropagation();
+             
+             if (backendConnected) {
+                 setIsBatchActive(prev => !prev);
+             } else {
+                 setShowModelSettings(true);
+             }
+             return false;
+        }
+
         if (showClassSelector || showGridConfig || showBatchSettings) {
             if (e.key === 'Escape') {
                 e.preventDefault();
@@ -706,22 +725,18 @@ const App: React.FC = () => {
           return;
         }
 
-        // CTRL + T -> Toggle Batch Active State
-        if (e.ctrlKey && key === 't') {
-            e.preventDefault(); // Try to prevent "New Tab"
-            if (backendConnected) {
-                setIsBatchActive(prev => !prev);
-            } else {
-                setShowModelSettings(true);
-            }
-            return;
-        }
-
         // CTRL + B -> Toggle Labels
         if (e.ctrlKey && key === 'b') {
             e.preventDefault();
             setLabelsVisible(prev => !prev);
             return;
+        }
+
+        // CTRL + V -> Toggle Model Labels
+        if (e.ctrlKey && key === 'v') {
+             e.preventDefault();
+             setShowModelLabels(prev => !prev);
+             return;
         }
 
         if (showHelp) {
@@ -730,6 +745,10 @@ const App: React.FC = () => {
         }
 
         switch (key) {
+            case 'v': // Single key V: Toggle Manual Labels
+                e.preventDefault();
+                setLabelsVisible(prev => !prev);
+                break;
             case 'd': // Next Image
             case 'arrowright':
                 e.preventDefault();
@@ -806,8 +825,9 @@ const App: React.FC = () => {
         }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    // Use capture: true to try and intercept Ctrl+T before browser default
+    window.addEventListener('keydown', handleKeyDown, { capture: true });
+    return () => window.removeEventListener('keydown', handleKeyDown, { capture: true });
   }, [isSetup, nextImage, prevImage, nextLabel, prevLabel, handleLabelDelete, isCreating, showClassSelector, selectorIndex, classes, currentLabels, currentLabelIdx, showHelp, filteredClassList, classSearchTerm, pendingLabelIndex, inferenceConfig, currentImageIdx, backendConnected, showToolsMenu, viewMode, showGridConfig, isBatchActive, showBatchSettings]);
 
   useEffect(() => {
@@ -1154,8 +1174,17 @@ const App: React.FC = () => {
                                 className="w-full text-left px-2 py-2 mt-1 hover:bg-slate-700 rounded flex items-center gap-2 text-sm text-slate-200"
                              >
                                  {labelsVisible ? <Eye size={14} className="text-emerald-400" /> : <EyeOff size={14} className="text-slate-500" />}
-                                 <span>{labelsVisible ? 'Hide Labels' : 'Show Labels'}</span>
-                                 <span className="ml-auto text-[10px] bg-slate-900 px-1 rounded text-slate-500">Ctrl+B</span>
+                                 <span>{labelsVisible ? 'Hide Manual' : 'Show Manual'}</span>
+                                 <span className="ml-auto text-[10px] bg-slate-900 px-1 rounded text-slate-500">V</span>
+                             </button>
+
+                             <button 
+                                onClick={() => setShowModelLabels(!showModelLabels)}
+                                className="w-full text-left px-2 py-2 hover:bg-slate-700 rounded flex items-center gap-2 text-sm text-slate-200"
+                             >
+                                 {showModelLabels ? <Bot size={14} className="text-amber-400" /> : <Bot size={14} className="text-slate-500" />}
+                                 <span>{showModelLabels ? 'Hide Model' : 'Show Model'}</span>
+                                 <span className="ml-auto text-[10px] bg-slate-900 px-1 rounded text-slate-500">Ctrl+V</span>
                              </button>
 
                              <button 
@@ -1247,7 +1276,7 @@ const App: React.FC = () => {
             {lastSaveStatus === 'error' && (
                 <span className="text-xs text-red-400">Save Error</span>
             )}
-            <span className="text-xs text-slate-600 ml-2">v2.5.0</span>
+            <span className="text-xs text-slate-600 ml-2">v2.6.0</span>
         </div>
       </header>
       
@@ -1281,6 +1310,8 @@ const App: React.FC = () => {
                         gridMode={gridMode}
                         zoomSettings={{ context: gridConfig.context, mag: gridConfig.magnification }}
                         slideshowSettings={{ interval: gridConfig.interval, isPlaying: gridConfig.isPlaying }}
+                        showModelLabels={showModelLabels}
+                        labelsVisible={labelsVisible}
                     />
                 ) : (
                     <>
@@ -1292,6 +1323,7 @@ const App: React.FC = () => {
                             isCreating={isCreating}
                             showBoxFill={showBoxFill}
                             labelsVisible={labelsVisible}
+                            showModelLabels={showModelLabels}
                             pendingLabelIndex={pendingLabelIndex}
                             onSelectLabel={setCurrentLabelIdx}
                             onUpdateLabel={handleLabelUpdate}
@@ -1372,8 +1404,12 @@ const App: React.FC = () => {
                         <div className="space-y-4">
                              <h3 className="text-sm font-bold text-slate-400 uppercase border-b border-slate-700 pb-2">View Controls</h3>
                              <div className="flex justify-between items-center text-sm">
-                                <span className="text-slate-300">Toggle Labels</span>
-                                <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">Ctrl + B</span>
+                                <span className="text-slate-300">Toggle Manual Labels</span>
+                                <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">V</span>
+                            </div>
+                             <div className="flex justify-between items-center text-sm">
+                                <span className="text-slate-300">Toggle Model Labels</span>
+                                <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">Ctrl + V</span>
                             </div>
                             <div className="flex justify-between items-center text-sm">
                                 <span className="text-indigo-300 font-bold">Toggle Auto-Detect</span>
