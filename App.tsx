@@ -519,8 +519,23 @@ const App: React.FC = () => {
             newMap.set(key, predictions);
             return newMap;
         });
+        
+        // Clear failure count on success
+        setFailureCounts(prev => {
+            const newMap = new Map(prev);
+            newMap.delete(key);
+            return newMap;
+        });
+
     } catch (e) {
         console.error("Inference failed", e);
+        const key = currentImg.name.replace(/\.[^/.]+$/, "");
+        setFailureCounts(prev => {
+             const newMap = new Map(prev);
+             const count = (newMap.get(key) || 0) + 1;
+             newMap.set(key, count);
+             return newMap;
+        });
         alert("Inference failed. Is the Python backend running?");
     } finally {
         setIsInferencing(false);
@@ -702,22 +717,28 @@ const App: React.FC = () => {
       setLastSaveStatus('saving');
       try {
         let handle = labelHandles.get(imgKey);
-        let targetDirHandle = labelsDirHandle;
+        // Custom Logic: If modelOutputHandle is set, use that folder instead of original
+        let targetDirHandle = modelOutputHandle || labelsDirHandle;
 
-        // Custom Logic: If modelOutputHandle is set and we are force-saving predictions or creating new
         if (modelOutputHandle) {
-             targetDirHandle = modelOutputHandle;
-             // We need to get the handle from the new folder
-             // If we already have a handle for this key, check if it belongs to this dir?
-             // Simplification: We overwrite the handle in labelHandles map with the new one from Model Folder.
-             handle = undefined; // Force lookup in new folder
+             // If we are using a custom output folder, we must ensure we are writing to it.
+             // We can't use the handle from `labelHandles` map because that might point to the original input folder.
+             // We must attempt to get the file handle from the modelOutputHandle.
+             handle = undefined; 
         }
         
         if (!handle && targetDirHandle) {
              handle = await targetDirHandle.getFileHandle(`${imgKey}.txt`, { create: true });
-             const newHandles = new Map(labelHandles);
-             newHandles.set(imgKey, handle);
-             setLabelHandles(newHandles);
+             // We don't update the global labelHandles map if we are using modelOutputHandle, 
+             // because that might confuse loading logic for other files? 
+             // Actually, the app loads from the Input folder.
+             // If we write to Output folder, we are technically creating a split dataset.
+             // But for the purpose of this session, if we create it, we can cache it.
+             if (!modelOutputHandle) {
+                 const newHandles = new Map(labelHandles);
+                 newHandles.set(imgKey, handle);
+                 setLabelHandles(newHandles);
+             }
         }
 
         if (handle) {
