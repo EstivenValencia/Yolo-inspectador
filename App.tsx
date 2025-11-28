@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { SetupScreen } from './components/SetupScreen';
 import { ImageViewer } from './components/ImageViewer';
@@ -8,19 +7,33 @@ import { GridView } from './components/GridView';
 import { ImageAsset, YoloLabel, FileSystemFileHandle, FileSystemDirectoryHandle } from './types';
 import { parseYoloString, serializeYoloString } from './utils/yoloHelper';
 import { detectObjects, BackendConfig, checkBackendHealth } from './utils/apiHelper';
+import { translations } from './utils/translations';
 import { ArrowLeft, ArrowRight, Image as ImageIcon, Filter, CheckCircle, Save, PlusSquare, BoxSelect, Home, Search, Keyboard, X, PlusCircle, Wifi, WifiOff, FileCheck, Loader2, Wrench, Eye, EyeOff, ChevronDown, Grid, Square, Settings, LayoutGrid, Zap, ZapOff, Sliders, ZoomIn, Clock, Bot } from 'lucide-react';
 
 const App: React.FC = () => {
+  // Localization State
+  const [lang, setLang] = useState<'en' | 'es'>(() => {
+      return (localStorage.getItem('yolo_inspector_lang') as 'en' | 'es') || 'en';
+  });
+  const t = translations[lang];
+
+  const toggleLang = (l: 'en' | 'es') => {
+      setLang(l);
+      localStorage.setItem('yolo_inspector_lang', l);
+  };
+
   const [isSetup, setIsSetup] = useState(false);
   
   // Data State
   const [images, setImages] = useState<ImageAsset[]>([]);
   const [labelsRaw, setLabelsRaw] = useState<Map<string, string>>(new Map());
-  // Predictions Cache: Stores model predictions in memory. Key: ImageName, Value: YoloLabel[]
+  // Predictions Cache
   const [predictionsCache, setPredictionsCache] = useState<Map<string, YoloLabel[]>>(new Map());
   
   const [labelHandles, setLabelHandles] = useState<Map<string, FileSystemFileHandle>>(new Map());
   const [labelsDirHandle, setLabelsDirHandle] = useState<FileSystemDirectoryHandle | null>(null);
+  const [modelOutputHandle, setModelOutputHandle] = useState<FileSystemDirectoryHandle | null>(null); // Custom Output Folder
+
   const [classes, setClasses] = useState<string[]>([]);
   const [classFileHandle, setClassFileHandle] = useState<FileSystemFileHandle | null>(null);
   
@@ -37,7 +50,6 @@ const App: React.FC = () => {
   const [gridConfig, setGridConfig] = useState({ 
       rows: 3, 
       cols: 4,
-      // Zoom Grid Settings
       context: 30, // %
       magnification: 1,
       interval: 2000, // ms
@@ -46,7 +58,7 @@ const App: React.FC = () => {
   const [showGridConfig, setShowGridConfig] = useState(false);
   const [gridConfigTab, setGridConfigTab] = useState<'layout' | 'zoom' | 'playback'>('layout');
   
-  // Persistent Zoom/Display Settings (Single View)
+  // Persistent Zoom
   const [zoomSettings, setZoomSettings] = useState<{context: number, mag: number}>(() => {
      try {
        const saved = localStorage.getItem('defect_inspector_zoom');
@@ -56,7 +68,6 @@ const App: React.FC = () => {
      }
   });
 
-  // Persistent Class Usage Stats (For sorting)
   const [classUsage, setClassUsage] = useState<Record<string, number>>(() => {
       try {
           const saved = localStorage.getItem('yolo_class_usage');
@@ -78,26 +89,24 @@ const App: React.FC = () => {
       overlapHeightRatio: 0.0
   });
   
-  // Batch / Background Inference State
   const [isBatchActive, setIsBatchActive] = useState(false);
   const [batchSettings, setBatchSettings] = useState({ lookahead: 50, delay: 100 });
   const [isBackgroundProcessing, setIsBackgroundProcessing] = useState(false);
   const [showBatchSettings, setShowBatchSettings] = useState(false);
 
-  const [isInferencing, setIsInferencing] = useState(false); // Single inference loading state
+  const [isInferencing, setIsInferencing] = useState(false);
   const [backendConnected, setBackendConnected] = useState(false);
 
   useEffect(() => {
      localStorage.setItem('defect_inspector_zoom', JSON.stringify(zoomSettings));
   }, [zoomSettings]);
 
-  // Check Backend Connection periodically
   useEffect(() => {
       const check = async () => {
           const isUp = await checkBackendHealth(inferenceConfig.apiUrl);
           setBackendConnected(isUp);
           if (!isUp && isBatchActive) {
-             setIsBatchActive(false); // Auto-stop batch if connection lost
+             setIsBatchActive(false); 
           }
       };
       check();
@@ -105,7 +114,6 @@ const App: React.FC = () => {
       return () => clearInterval(interval);
   }, [inferenceConfig.apiUrl, isBatchActive]);
 
-  // Helper to increment usage
   const recordClassUsage = (className: string) => {
       setClassUsage(prev => {
           const next = { ...prev, [className]: (prev[className] || 0) + 1 };
@@ -114,29 +122,24 @@ const App: React.FC = () => {
       });
   };
 
-  // Modes
-  const [isCreating, setIsCreating] = useState(false); // Creation Mode (Key: e)
-  const [showBoxFill, setShowBoxFill] = useState(false); // Box Fill Mode (Key: f)
-  const [labelsVisible, setLabelsVisible] = useState(true); // Toggle Visibility (Key: V or Ctrl + B)
-  const [showModelLabels, setShowModelLabels] = useState(true); // Toggle Model Labels (Key: Ctrl + V)
-  const [showHelp, setShowHelp] = useState(false); // Help Modal (Key: Ctrl+H)
-  const [showToolsMenu, setShowToolsMenu] = useState(false); // Tools Dropdown
+  const [isCreating, setIsCreating] = useState(false); 
+  const [showBoxFill, setShowBoxFill] = useState(false); 
+  const [labelsVisible, setLabelsVisible] = useState(true); 
+  const [showModelLabels, setShowModelLabels] = useState(true); 
+  const [showHelp, setShowHelp] = useState(false); 
+  const [showToolsMenu, setShowToolsMenu] = useState(false); 
   
-  // Class Selector Modal State (Key: r)
   const [showClassSelector, setShowClassSelector] = useState(false);
   const [selectorIndex, setSelectorIndex] = useState(0);
   const [classSearchTerm, setClassSearchTerm] = useState("");
   const classSelectorRef = useRef<HTMLDivElement>(null);
   const classSearchInputRef = useRef<HTMLInputElement>(null);
 
-  // Working State
   const [currentLabels, setCurrentLabels] = useState<YoloLabel[]>([]);
   const [lastSaveStatus, setLastSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   
-  // Pending Creation State
   const [pendingLabelIndex, setPendingLabelIndex] = useState<number | null>(null);
 
-  // Load Setup Data
   const handleSetupComplete = (
     loadedImages: ImageAsset[], 
     loadedLabels: Map<string, string>, 
@@ -153,11 +156,12 @@ const App: React.FC = () => {
     setClassFileHandle(loadedClassHandle);
     setIsSetup(true);
     setCurrentImageIdx(0);
-    setPredictionsCache(new Map()); // Reset cache on new setup
+    setPredictionsCache(new Map());
+    setModelOutputHandle(null); // Reset custom output on new load
   };
 
   const handleHome = () => {
-      if (window.confirm("Return to Home? Unsaved changes to the current image might be lost if not yet written to disk.")) {
+      if (window.confirm(lang === 'es' ? "¿Volver al inicio? Los cambios no guardados se perderán." : "Return to Home? Unsaved changes might be lost.")) {
           setIsSetup(false);
           setImages([]);
           setLabelsRaw(new Map());
@@ -167,7 +171,6 @@ const App: React.FC = () => {
       }
   };
 
-  // Resizing Logic for Panel
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizing) return;
@@ -199,16 +202,13 @@ const App: React.FC = () => {
     setIsResizing(true);
   };
 
-  // --- Filtering Logic for Image Navigation ---
   const filteredImages = useMemo(() => {
     if (filterClassId === -1) return images;
 
-    // Special Filter: Unlabeled Images (-2)
     if (filterClassId === -2) {
         return images.filter(img => {
             const key = img.name.replace(/\.[^/.]+$/, "");
             const raw = labelsRaw.get(key);
-            // Considered unlabeled if no entry or empty content
             if (!raw) return true;
             const labels = parseYoloString(raw);
             return labels.length === 0;
@@ -224,12 +224,10 @@ const App: React.FC = () => {
     });
   }, [images, labelsRaw, filterClassId]);
 
-  // Reset index when filter changes
   useEffect(() => {
     setCurrentImageIdx(0);
   }, [filterClassId]);
 
-  // --- Filter Logic for Class Selector ---
   const filteredClassList = useMemo(() => {
       const mapped = classes.map((c, i) => ({ 
           index: i, 
@@ -248,7 +246,6 @@ const App: React.FC = () => {
   }, [classes, classSearchTerm, classUsage]);
 
 
-  // --- Data Loading ---
   useEffect(() => {
     if (!isSetup || filteredImages.length === 0) {
       setCurrentLabels([]);
@@ -257,7 +254,6 @@ const App: React.FC = () => {
     }
 
     const effectiveIdx = Math.min(currentImageIdx, filteredImages.length - 1);
-    // If index corrected, trigger re-render with correct index
     if (effectiveIdx !== currentImageIdx) {
         setCurrentImageIdx(effectiveIdx);
         return; 
@@ -267,15 +263,9 @@ const App: React.FC = () => {
     if (!img) return;
 
     const key = img.name.replace(/\.[^/.]+$/, "");
-    
-    // 1. Get Saved Labels
     const rawContent = labelsRaw.get(key) || "";
     const savedLabels = parseYoloString(rawContent);
-
-    // 2. Get Cached Predictions (Ghost Labels)
     const cachedPredictions = predictionsCache.get(key) || [];
-    
-    // 3. Merge: Saved Labels + Predicted Labels
     const mergedLabels = [...savedLabels, ...cachedPredictions];
     
     setCurrentLabels(mergedLabels);
@@ -285,7 +275,6 @@ const App: React.FC = () => {
     setShowClassSelector(false);
 
     if (mergedLabels.length > 0) {
-       // If filtering by specific class, try to select that class first
        if (filterClassId !== -1 && filterClassId !== -2) {
           const matchIdx = mergedLabels.findIndex(l => l.classId === filterClassId);
           if (matchIdx !== -1) {
@@ -294,7 +283,6 @@ const App: React.FC = () => {
              setCurrentLabelIdx(0);
           }
        } else {
-           // Default logic
            if (currentLabelIdx >= mergedLabels.length || currentLabelIdx < 0) {
              setCurrentLabelIdx(0);
            }
@@ -307,7 +295,6 @@ const App: React.FC = () => {
   }, [currentImageIdx, filteredImages, labelsRaw, predictionsCache, isSetup, filterClassId]);
 
 
-  // --- Navigation Handlers ---
   const handlePageChange = (direction: 'next' | 'prev') => {
       if (viewMode === 'grid') {
           const itemsPerPage = gridConfig.rows * gridConfig.cols;
@@ -318,13 +305,11 @@ const App: React.FC = () => {
           if (newIdx >= 0 && newIdx < filteredImages.length) {
               setCurrentImageIdx(newIdx);
           } else if (direction === 'next' && currentImageIdx < filteredImages.length - 1) {
-              // Go to last item if next page overshoots
               setCurrentImageIdx(filteredImages.length - 1);
           } else if (direction === 'prev' && currentImageIdx > 0) {
               setCurrentImageIdx(0);
           }
       } else {
-          // Single Mode
           if (direction === 'next' && currentImageIdx < filteredImages.length - 1) {
               setCurrentImageIdx(prev => prev + 1);
           } else if (direction === 'prev' && currentImageIdx > 0) {
@@ -346,7 +331,6 @@ const App: React.FC = () => {
     setCurrentLabelIdx(prev => (prev - 1 + currentLabels.length) % currentLabels.length);
   }, [currentLabels.length]);
 
-  // --- Core Update, Create & Save Logic ---
   const handleLabelUpdate = (updatedLabel: YoloLabel, index?: number) => {
     const targetIdx = index !== undefined ? index : currentLabelIdx;
 
@@ -390,7 +374,6 @@ const App: React.FC = () => {
       setShowClassSelector(true);
   };
 
-  // --- SINGLE INFERENCE (Manual Trigger) ---
   const handleRunInference = async () => {
     const currentImg = filteredImages[currentImageIdx];
     
@@ -411,7 +394,6 @@ const App: React.FC = () => {
         const key = currentImg.name.replace(/\.[^/.]+$/, "");
         setPredictionsCache(prev => {
             const newMap = new Map(prev);
-            // Always set, even if empty, so we know it was processed
             newMap.set(key, predictions);
             return newMap;
         });
@@ -423,23 +405,17 @@ const App: React.FC = () => {
     }
   };
 
-  // --- BACKGROUND BATCH WORKER ---
   useEffect(() => {
-    // Conditions to run the worker
     if (!isBatchActive || !backendConnected || isBackgroundProcessing || filteredImages.length === 0) return;
 
-    // 1. Find the next image in the "Lookahead Window" that hasn't been processed yet
     const findNextCandidate = () => {
-        // Start from current position, scan forward up to 'lookahead' amount
         for (let i = 0; i < batchSettings.lookahead; i++) {
             const targetIdx = currentImageIdx + i;
-            // Stop if we reach end of filtered list
             if (targetIdx >= filteredImages.length) break;
 
             const img = filteredImages[targetIdx];
             const key = img.name.replace(/\.[^/.]+$/, "");
             
-            // Check cache. If key exists (even if empty array), it's processed.
             if (!predictionsCache.has(key)) {
                 return { idx: targetIdx, img };
             }
@@ -450,15 +426,12 @@ const App: React.FC = () => {
     const candidate = findNextCandidate();
 
     if (candidate) {
-        // Lock the worker
         setIsBackgroundProcessing(true);
         const { img } = candidate;
 
         const processImage = async () => {
-             // Artificial Delay to prevent UI freeze and network saturation
              await new Promise(r => setTimeout(r, batchSettings.delay));
              
-             // Double check if still active
              if (!isBatchActive) {
                  setIsBackgroundProcessing(false);
                  return;
@@ -469,17 +442,15 @@ const App: React.FC = () => {
                      const predictions = await detectObjects(img.file, inferenceConfig);
                      const key = img.name.replace(/\.[^/.]+$/, "");
                      
-                     // Update Cache
                      setPredictionsCache(prev => {
                          const newMap = new Map(prev);
-                         newMap.set(key, predictions); // Stores [] if empty
+                         newMap.set(key, predictions); 
                          return newMap;
                      });
                  } catch (e) {
                      console.warn(`Bg inference failed for ${img.name}`, e);
                  }
              }
-             // Unlock
              setIsBackgroundProcessing(false);
         };
         processImage();
@@ -488,17 +459,11 @@ const App: React.FC = () => {
 
 
   const handleAcceptPredictions = () => {
-      // Logic applies to CURRENT IMAGE index (works for single and grid selected)
       const currentImg = filteredImages[currentImageIdx];
       if (!currentImg) return;
       
-      const hasPredictions = currentLabels.some(l => l.isPredicted);
-      // Even if no predictions on current labels array (maybe hidden?), we check logic
-      // Actually we should only save what is visible/active in currentLabels state
-      
       const key = currentImg.name.replace(/\.[^/.]+$/, "");
 
-      // 1. Convert predictions to real labels
       const newLabels = currentLabels.map(l => {
           if (l.isPredicted) {
               const { isPredicted, ...rest } = l;
@@ -507,14 +472,12 @@ const App: React.FC = () => {
           return l;
       });
 
-      // 2. Clear from Cache (since they are now saved persistently)
       setPredictionsCache(prev => {
           const newMap = new Map(prev);
           newMap.delete(key);
           return newMap;
       });
 
-      // 3. Update State & Disk
       setCurrentLabels(newLabels);
       updateRawDataAndSave(newLabels, true); 
   };
@@ -540,7 +503,6 @@ const App: React.FC = () => {
           const newLabels = [...currentLabels];
           newLabels.splice(currentLabelIdx, 1);
           
-          // If deleting a cached prediction, remove it from cache
           if (labelToDelete.isPredicted) {
                const currentImg = filteredImages[currentImageIdx];
                const key = currentImg.name.replace(/\.[^/.]+$/, "");
@@ -589,9 +551,19 @@ const App: React.FC = () => {
       setLastSaveStatus('saving');
       try {
         let handle = labelHandles.get(imgKey);
+        let targetDirHandle = labelsDirHandle;
+
+        // Custom Logic: If modelOutputHandle is set and we are force-saving predictions or creating new
+        if (modelOutputHandle) {
+             targetDirHandle = modelOutputHandle;
+             // We need to get the handle from the new folder
+             // If we already have a handle for this key, check if it belongs to this dir?
+             // Simplification: We overwrite the handle in labelHandles map with the new one from Model Folder.
+             handle = undefined; // Force lookup in new folder
+        }
         
-        if (!handle && labelsDirHandle) {
-             handle = await labelsDirHandle.getFileHandle(`${imgKey}.txt`, { create: true });
+        if (!handle && targetDirHandle) {
+             handle = await targetDirHandle.getFileHandle(`${imgKey}.txt`, { create: true });
              const newHandles = new Map(labelHandles);
              newHandles.set(imgKey, handle);
              setLabelHandles(newHandles);
@@ -634,12 +606,10 @@ const App: React.FC = () => {
       return newClasses.length - 1;
   };
 
-  // --- Keyboard Shortcuts ---
   useEffect(() => {
     if (!isSetup) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-        // Special Handling for Ctrl + T (Capture Phase attempt)
         if (e.ctrlKey && e.key.toLowerCase() === 't') {
              e.preventDefault();
              e.stopPropagation();
@@ -663,7 +633,6 @@ const App: React.FC = () => {
                 setShowGridConfig(false);
                 setShowBatchSettings(false);
             } else if (e.key === 'Enter' && showClassSelector) {
-                // ... (Existing Enter logic for class selector) ...
                 e.preventDefault();
                 const hasExactMatch = filteredClassList.find(c => c.name.toLowerCase() === classSearchTerm.toLowerCase());
                 const hasMatches = filteredClassList.length > 0;
@@ -725,14 +694,12 @@ const App: React.FC = () => {
           return;
         }
 
-        // CTRL + B -> Toggle Labels
         if (e.ctrlKey && key === 'b') {
             e.preventDefault();
             setLabelsVisible(prev => !prev);
             return;
         }
 
-        // CTRL + V -> Toggle Model Labels
         if (e.ctrlKey && key === 'v') {
              e.preventDefault();
              setShowModelLabels(prev => !prev);
@@ -745,28 +712,28 @@ const App: React.FC = () => {
         }
 
         switch (key) {
-            case 'v': // Single key V: Toggle Manual Labels
+            case 'v':
                 e.preventDefault();
                 setLabelsVisible(prev => !prev);
                 break;
-            case 'd': // Next Image
+            case 'd': 
             case 'arrowright':
                 e.preventDefault();
                 nextImage();
                 break;
-            case 'a': // Prev Image
+            case 'a':
             case 'arrowleft':
                 e.preventDefault();
                 prevImage();
                 break;
-            case 'w': // Next Defect (Up)
+            case 'w':
             case 'arrowup':
                 if (viewMode === 'single') {
                     e.preventDefault();
                     nextLabel();
                 }
                 break;
-            case 's': // Prev Defect (Down)
+            case 's':
             case 'arrowdown':
                 if (viewMode === 'single') {
                     e.preventDefault();
@@ -774,37 +741,37 @@ const App: React.FC = () => {
                 }
                 break;
             
-            case 'q': // Delete Label
+            case 'q':
             case 'delete':
                 if (viewMode === 'single') {
                     e.preventDefault();
                     handleLabelDelete();
                 }
                 break;
-            case 'e': // Mode: Create
+            case 'e': 
                 if (viewMode === 'single') {
                     e.preventDefault();
                     setIsCreating(prev => !prev);
                 }
                 break;
-            case 'f': // Mode: Box Fill
+            case 'f':
                 e.preventDefault();
                 setShowBoxFill(prev => !prev);
                 break;
             
-            case 't': // INFERENCE TRIGGER (Single)
+            case 't': 
                 if (!e.ctrlKey) { 
                     e.preventDefault();
                     handleRunInference();
                 }
                 break;
             
-            case 'y': // ACCEPT PREDICTIONS
+            case 'y': 
                 e.preventDefault();
                 handleAcceptPredictions();
                 break;
 
-            case 'r': // Rename / Reclassify
+            case 'r': 
                 if (viewMode === 'single' && currentLabels.length > 0 && currentLabelIdx !== -1) {
                     e.preventDefault();
                     setClassSearchTerm("");
@@ -825,7 +792,6 @@ const App: React.FC = () => {
         }
     };
 
-    // Use capture: true to try and intercept Ctrl+T before browser default
     window.addEventListener('keydown', handleKeyDown, { capture: true });
     return () => window.removeEventListener('keydown', handleKeyDown, { capture: true });
   }, [isSetup, nextImage, prevImage, nextLabel, prevLabel, handleLabelDelete, isCreating, showClassSelector, selectorIndex, classes, currentLabels, currentLabelIdx, showHelp, filteredClassList, classSearchTerm, pendingLabelIndex, inferenceConfig, currentImageIdx, backendConnected, showToolsMenu, viewMode, showGridConfig, isBatchActive, showBatchSettings]);
@@ -857,7 +823,7 @@ const App: React.FC = () => {
   };
 
   if (!isSetup) {
-    return <SetupScreen onComplete={handleSetupComplete} />;
+    return <SetupScreen onComplete={handleSetupComplete} lang={lang} onToggleLang={toggleLang} />;
   }
 
   const currentImage = filteredImages[currentImageIdx];
@@ -874,7 +840,7 @@ const App: React.FC = () => {
             <button 
                 onClick={handleHome}
                 className="bg-slate-800 hover:bg-slate-700 p-2 rounded-lg text-slate-300 border border-slate-700 transition-colors"
-                title="Back to Home / Change Folders"
+                title={t.app.backHome}
             >
                 <Home size={20} />
             </button>
@@ -893,17 +859,14 @@ const App: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-4">
-             {/* Model Status */}
              <button
                 onClick={() => setShowModelSettings(true)}
                 className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-bold transition-all border ${backendConnected ? 'bg-emerald-900/50 border-emerald-500 text-emerald-300 hover:bg-emerald-900' : 'bg-red-900/30 border-red-800 text-red-400 hover:bg-red-900/50'}`}
-                title="Configure Backend"
              >
                 {backendConnected ? <Wifi size={14} /> : <WifiOff size={14} />}
-                {backendConnected ? 'Connected' : 'Offline'}
+                {backendConnected ? t.app.connected : t.app.offline}
              </button>
              
-             {/* Batch Inference Toggle Controls */}
              <div className="flex items-center bg-slate-800 rounded-lg border border-slate-700 p-0.5 relative">
                  <button 
                     onClick={() => {
@@ -914,10 +877,9 @@ const App: React.FC = () => {
                     className={`flex items-center gap-2 px-3 py-1.5 rounded-l-md text-xs font-bold transition-all border-r border-slate-900 ${isBatchActive
                         ? 'bg-emerald-600 hover:bg-emerald-500 text-white' 
                         : (backendConnected ? 'bg-slate-700 hover:bg-slate-600 text-slate-300' : 'bg-slate-800 text-slate-600 cursor-not-allowed')}`}
-                    title="Toggle Auto-Detect Background Worker (Ctrl+T)"
                  >
                     {isBatchActive ? <Zap size={14} className="fill-white" /> : <ZapOff size={14} />}
-                    {isBatchActive ? 'Auto: ON' : 'Auto: OFF'}
+                    {isBatchActive ? t.app.autoOn : t.app.autoOff}
                  </button>
                  <button
                     onClick={(e) => {
@@ -927,12 +889,11 @@ const App: React.FC = () => {
                         setShowToolsMenu(false);
                     }}
                     className="px-2 py-1.5 rounded-r-md hover:bg-slate-600 text-slate-400 hover:text-white transition-colors"
-                    title="Batch Settings"
+                    title={t.app.batchSettings}
                 >
                     <Sliders size={14} />
                 </button>
 
-                {/* Batch Settings Popover */}
                  {showBatchSettings && (
                     <div 
                         className="absolute top-full right-0 mt-2 bg-slate-800 border border-slate-600 rounded-lg shadow-xl z-50 p-4 w-56"
@@ -940,12 +901,12 @@ const App: React.FC = () => {
                         onClick={(e) => e.stopPropagation()}
                     >
                          <h4 className="text-xs font-bold text-slate-400 uppercase mb-3 flex items-center gap-2">
-                             <Zap size={12} /> Auto-Detect Settings
+                             <Zap size={12} /> {t.app.batch.title}
                          </h4>
                          <div className="space-y-4">
                              <div>
                                  <label className="text-xs text-slate-300 flex justify-between mb-1">
-                                     Lookahead Buffer
+                                     {t.app.batch.lookahead}
                                      <b className="text-indigo-400">{batchSettings.lookahead}</b>
                                  </label>
                                  <input 
@@ -954,11 +915,11 @@ const App: React.FC = () => {
                                     onChange={(e) => setBatchSettings(prev => ({...prev, lookahead: parseInt(e.target.value)}))}
                                     className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-indigo-500"
                                  />
-                                 <p className="text-[10px] text-slate-500 mt-1">Images to pre-process ahead of current view.</p>
+                                 <p className="text-[10px] text-slate-500 mt-1">{t.app.batch.lookaheadDesc}</p>
                              </div>
                              <div>
                                  <label className="text-xs text-slate-300 flex justify-between mb-1">
-                                     Delay (Throttle)
+                                     {t.app.batch.delay}
                                      <b className="text-indigo-400">{batchSettings.delay}ms</b>
                                  </label>
                                  <input 
@@ -967,42 +928,37 @@ const App: React.FC = () => {
                                     onChange={(e) => setBatchSettings(prev => ({...prev, delay: parseInt(e.target.value)}))}
                                     className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-indigo-500"
                                  />
-                                  <p className="text-[10px] text-slate-500 mt-1">Pause between requests to save CPU/Network.</p>
+                                  <p className="text-[10px] text-slate-500 mt-1">{t.app.batch.delayDesc}</p>
                              </div>
                          </div>
                     </div>
                 )}
              </div>
             
-             {/* Pending Predictions Indicator */}
              {pendingPredictionsCount > 0 && viewMode === 'single' && (
                  <button 
                     onClick={handleAcceptPredictions}
                     className="flex items-center gap-2 px-3 py-1.5 rounded text-xs font-bold transition-all border bg-amber-900/50 border-amber-500 text-amber-300 hover:bg-amber-900 animate-pulse"
-                    title="Click or press Y to save predictions to disk"
                  >
                     <FileCheck size={14} />
-                    {pendingPredictionsCount} Unsaved (Y)
+                    {pendingPredictionsCount} {t.app.unsaved}
                  </button>
              )}
 
-            {/* View Mode Toggle with Configuration */}
             <div className="flex items-center bg-slate-800 rounded-lg border border-slate-700 p-0.5 relative">
                 <button
                     onClick={() => setViewMode(prev => prev === 'single' ? 'grid' : 'single')}
                     className="flex items-center gap-2 px-3 py-1.5 rounded-l-md text-xs font-bold bg-slate-700 text-white hover:bg-slate-600 transition-colors border-r border-slate-900"
-                    title="Toggle View Mode"
                 >
                     {viewMode === 'single' ? <Square size={14} /> : <LayoutGrid size={14} />}
-                    {viewMode === 'single' ? 'Single' : 'Matrix'}
+                    {viewMode === 'single' ? t.app.single : t.app.matrix}
                 </button>
                 {viewMode === 'grid' && (
                      <button
                         onClick={() => setGridMode(prev => prev === 'normal' ? 'zoom' : 'normal')}
                         className={`flex items-center gap-2 px-3 py-1.5 text-xs font-bold transition-colors border-r border-slate-900 ${gridMode === 'zoom' ? 'bg-indigo-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}
-                        title="Toggle Zoom Mode"
                      >
-                         {gridMode === 'normal' ? 'Normal' : 'Zoom'}
+                         {gridMode === 'normal' ? t.app.normal : t.app.zoom}
                      </button>
                 )}
                 <button
@@ -1013,12 +969,11 @@ const App: React.FC = () => {
                         setShowToolsMenu(false);
                     }}
                     className="px-2 py-1.5 rounded-r-md hover:bg-slate-600 text-slate-400 hover:text-white transition-colors"
-                    title="Grid Settings"
+                    title={t.app.gridSettings}
                 >
                     <Settings size={14} />
                 </button>
 
-                {/* Grid Config Popover */}
                 {showGridConfig && (
                     <div 
                         className="absolute top-full right-0 mt-2 bg-slate-800 border border-slate-600 rounded-lg shadow-xl z-50 p-4 w-64"
@@ -1026,38 +981,36 @@ const App: React.FC = () => {
                         onClick={(e) => e.stopPropagation()}
                     >
                          <h4 className="text-xs font-bold text-slate-400 uppercase mb-3 flex items-center gap-2">
-                             <Grid size={12} /> Matrix Configuration
+                             <Grid size={12} /> {t.app.gridSettings}
                          </h4>
                          
-                         {/* Tabs Header */}
                          <div className="flex border-b border-slate-600 mb-4">
                             <button 
                                 onClick={() => setGridConfigTab('layout')}
                                 className={`flex-1 pb-2 text-[10px] font-bold uppercase transition-colors ${gridConfigTab === 'layout' ? 'text-indigo-400 border-b-2 border-indigo-500' : 'text-slate-500 hover:text-slate-300'}`}
                             >
-                                Layout
+                                {t.app.grid.layout}
                             </button>
                             <button 
                                 onClick={() => setGridConfigTab('zoom')}
                                 className={`flex-1 pb-2 text-[10px] font-bold uppercase transition-colors ${gridConfigTab === 'zoom' ? 'text-indigo-400 border-b-2 border-indigo-500' : 'text-slate-500 hover:text-slate-300'}`}
                             >
-                                Zoom
+                                {t.app.grid.zoom}
                             </button>
                             <button 
                                 onClick={() => setGridConfigTab('playback')}
                                 className={`flex-1 pb-2 text-[10px] font-bold uppercase transition-colors ${gridConfigTab === 'playback' ? 'text-indigo-400 border-b-2 border-indigo-500' : 'text-slate-500 hover:text-slate-300'}`}
                             >
-                                Cycle
+                                {t.app.grid.cycle}
                             </button>
                          </div>
 
-                         {/* Tab Content */}
                          <div className="space-y-3">
                              {gridConfigTab === 'layout' && (
                                  <>
                                      <div>
                                          <label className="text-xs text-slate-300 flex justify-between items-center mb-1">
-                                             Rows <b className="bg-slate-900 px-1 rounded">{gridConfig.rows}</b>
+                                             {t.app.grid.rows} <b className="bg-slate-900 px-1 rounded">{gridConfig.rows}</b>
                                          </label>
                                          <input 
                                             type="range" min="1" max="10" 
@@ -1068,7 +1021,7 @@ const App: React.FC = () => {
                                      </div>
                                      <div>
                                          <label className="text-xs text-slate-300 flex justify-between items-center mb-1">
-                                             Columns <b className="bg-slate-900 px-1 rounded">{gridConfig.cols}</b>
+                                             {t.app.grid.cols} <b className="bg-slate-900 px-1 rounded">{gridConfig.cols}</b>
                                          </label>
                                          <input 
                                             type="range" min="1" max="10" 
@@ -1084,11 +1037,11 @@ const App: React.FC = () => {
                                  <>
                                     <div className="flex items-start gap-2 mb-2 p-2 bg-indigo-900/20 border border-indigo-500/20 rounded">
                                         <ZoomIn size={14} className="text-indigo-400 mt-0.5" />
-                                        <p className="text-[10px] text-slate-400 leading-tight">Apply to Zoom Grid Mode.</p>
+                                        <p className="text-[10px] text-slate-400 leading-tight">{t.app.grid.applyZoom}</p>
                                     </div>
                                     <div>
                                          <label className="text-xs text-slate-300 flex justify-between items-center mb-1">
-                                             Crop Context <b className="bg-slate-900 px-1 rounded">{gridConfig.context}%</b>
+                                             {t.app.grid.context} <b className="bg-slate-900 px-1 rounded">{gridConfig.context}%</b>
                                          </label>
                                          <input 
                                             type="range" min="0" max="100" 
@@ -1099,7 +1052,7 @@ const App: React.FC = () => {
                                      </div>
                                      <div>
                                          <label className="text-xs text-slate-300 flex justify-between items-center mb-1">
-                                             Magnification <b className="bg-slate-900 px-1 rounded">{gridConfig.magnification}x</b>
+                                             {t.app.grid.magnification} <b className="bg-slate-900 px-1 rounded">{gridConfig.magnification}x</b>
                                          </label>
                                          <input 
                                             type="range" min="1" max="5" step="0.1"
@@ -1115,11 +1068,11 @@ const App: React.FC = () => {
                                  <>
                                     <div className="flex items-start gap-2 mb-2 p-2 bg-amber-900/20 border border-amber-500/20 rounded">
                                         <Clock size={14} className="text-amber-400 mt-0.5" />
-                                        <p className="text-[10px] text-slate-400 leading-tight">Cycle speed for images with multiple defects.</p>
+                                        <p className="text-[10px] text-slate-400 leading-tight">{t.app.grid.cycleSpeed}</p>
                                     </div>
                                     <div>
                                          <label className="text-xs text-slate-300 flex justify-between items-center mb-1">
-                                             Interval <b className="bg-slate-900 px-1 rounded">{gridConfig.interval / 1000}s</b>
+                                             {t.app.grid.interval} <b className="bg-slate-900 px-1 rounded">{gridConfig.interval / 1000}s</b>
                                          </label>
                                          <input 
                                             type="range" min="500" max="10000" step="500"
@@ -1129,7 +1082,7 @@ const App: React.FC = () => {
                                          />
                                      </div>
                                      <div className="flex items-center justify-between mt-2">
-                                        <span className="text-xs text-slate-300">Auto-Play</span>
+                                        <span className="text-xs text-slate-300">{t.app.grid.autoPlay}</span>
                                         <button 
                                             onClick={() => setGridConfig(prev => ({...prev, isPlaying: !prev.isPlaying}))}
                                             className={`w-10 h-5 rounded-full relative transition-colors ${gridConfig.isPlaying ? 'bg-indigo-600' : 'bg-slate-600'}`}
@@ -1144,7 +1097,6 @@ const App: React.FC = () => {
                 )}
             </div>
 
-            {/* Tools Dropdown */}
             <div className="relative">
                 <button 
                     onClick={(e) => {
@@ -1156,7 +1108,7 @@ const App: React.FC = () => {
                     className="flex items-center gap-2 px-3 py-1.5 rounded text-xs font-bold bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
                 >
                     <Wrench size={14} />
-                    Tools
+                    {t.app.tools}
                     <ChevronDown size={12} />
                 </button>
 
@@ -1167,14 +1119,14 @@ const App: React.FC = () => {
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="p-2 border-b border-slate-700">
-                             <span className="text-[10px] text-slate-500 uppercase font-bold px-2">Visualization</span>
+                             <span className="text-[10px] text-slate-500 uppercase font-bold px-2">{t.app.toolsMenu.visualization}</span>
                              
                              <button 
                                 onClick={() => setLabelsVisible(!labelsVisible)}
                                 className="w-full text-left px-2 py-2 mt-1 hover:bg-slate-700 rounded flex items-center gap-2 text-sm text-slate-200"
                              >
                                  {labelsVisible ? <Eye size={14} className="text-emerald-400" /> : <EyeOff size={14} className="text-slate-500" />}
-                                 <span>{labelsVisible ? 'Hide Manual' : 'Show Manual'}</span>
+                                 <span>{labelsVisible ? t.app.toolsMenu.hideManual : t.app.toolsMenu.showManual}</span>
                                  <span className="ml-auto text-[10px] bg-slate-900 px-1 rounded text-slate-500">V</span>
                              </button>
 
@@ -1183,7 +1135,7 @@ const App: React.FC = () => {
                                 className="w-full text-left px-2 py-2 hover:bg-slate-700 rounded flex items-center gap-2 text-sm text-slate-200"
                              >
                                  {showModelLabels ? <Bot size={14} className="text-amber-400" /> : <Bot size={14} className="text-slate-500" />}
-                                 <span>{showModelLabels ? 'Hide Model' : 'Show Model'}</span>
+                                 <span>{showModelLabels ? t.app.toolsMenu.hideModel : t.app.toolsMenu.showModel}</span>
                                  <span className="ml-auto text-[10px] bg-slate-900 px-1 rounded text-slate-500">Ctrl+V</span>
                              </button>
 
@@ -1192,12 +1144,12 @@ const App: React.FC = () => {
                                 className="w-full text-left px-2 py-2 hover:bg-slate-700 rounded flex items-center gap-2 text-sm text-slate-200"
                              >
                                  <BoxSelect size={14} className={showBoxFill ? 'text-indigo-400' : 'text-slate-500'} />
-                                 <span>{showBoxFill ? 'Fill Boxes' : 'Outline Only'}</span>
+                                 <span>{showBoxFill ? t.app.toolsMenu.fillBoxes : t.app.toolsMenu.outlineOnly}</span>
                                  <span className="ml-auto text-[10px] bg-slate-900 px-1 rounded text-slate-500">F</span>
                              </button>
                         </div>
                         <div className="p-2">
-                            <span className="text-[10px] text-slate-500 uppercase font-bold px-2">Actions</span>
+                            <span className="text-[10px] text-slate-500 uppercase font-bold px-2">{t.app.toolsMenu.actions}</span>
                             <button 
                                 onClick={() => {
                                     if (viewMode === 'grid') setViewMode('single');
@@ -1206,7 +1158,7 @@ const App: React.FC = () => {
                                 className={`w-full text-left px-2 py-2 mt-1 hover:bg-slate-700 rounded flex items-center gap-2 text-sm ${isCreating ? 'text-indigo-400 font-bold' : 'text-slate-200'}`}
                             >
                                 <PlusSquare size={14} />
-                                <span>{isCreating ? 'Stop Creating' : 'Create Label'}</span>
+                                <span>{isCreating ? t.app.toolsMenu.stopCreating : t.app.toolsMenu.createLabel}</span>
                                 <span className="ml-auto text-[10px] bg-slate-900 px-1 rounded text-slate-500">E</span>
                             </button>
                         </div>
@@ -1214,7 +1166,6 @@ const App: React.FC = () => {
                 )}
             </div>
             
-            {/* Filter */}
              <div className="flex items-center gap-2 mr-2 border-l border-slate-700 pl-4">
                 <Filter size={16} className="text-slate-400" />
                 <select 
@@ -1222,8 +1173,8 @@ const App: React.FC = () => {
                     onChange={(e) => setFilterClassId(parseInt(e.target.value))}
                     className="bg-slate-800 text-slate-200 text-xs p-1.5 rounded border border-slate-700 focus:ring-1 focus:ring-indigo-500 outline-none max-w-[150px] cursor-pointer"
                 >
-                    <option value={-1}>All Defects</option>
-                    <option value={-2}>Unlabeled Images</option>
+                    <option value={-1}>{t.app.filterAll}</option>
+                    <option value={-2}>{t.app.filterUnlabeled}</option>
                     {classes.map((cls, idx) => (
                         <option key={idx} value={idx}>{idx}: {cls}</option>
                     ))}
@@ -1239,7 +1190,7 @@ const App: React.FC = () => {
                     <ArrowLeft size={18} />
                 </button>
                 <span className="text-sm font-mono text-slate-400 min-w-[80px] text-center">
-                    {filteredImages.length > 0 ? (viewMode === 'grid' ? `Page` : currentImageIdx + 1) : 0} 
+                    {filteredImages.length > 0 ? (viewMode === 'grid' ? t.app.page : currentImageIdx + 1) : 0} 
                     {viewMode === 'grid' ? '' : ` / ${filteredImages.length}`}
                 </span>
                 <button 
@@ -1254,7 +1205,6 @@ const App: React.FC = () => {
             <button 
                 onClick={() => setShowHelp(true)}
                 className="p-2 hover:bg-slate-700 text-slate-400 hover:text-white rounded-lg transition-colors border border-transparent hover:border-slate-600"
-                title="Keyboard Shortcuts (Ctrl+H)"
             >
                 <Keyboard size={20} />
             </button>
@@ -1268,19 +1218,17 @@ const App: React.FC = () => {
                 <span className="text-xs text-indigo-400 flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> Auto...</span>
             )}
             {!isInferencing && !isBackgroundProcessing && lastSaveStatus === 'saving' && (
-                <span className="text-xs text-indigo-400 flex items-center gap-1"><Save size={12} className="animate-spin" /> Saving...</span>
+                <span className="text-xs text-indigo-400 flex items-center gap-1"><Save size={12} className="animate-spin" /> {t.app.saveSaving}</span>
             )}
             {!isInferencing && !isBackgroundProcessing && lastSaveStatus === 'saved' && (
-                <span className="text-xs text-emerald-400 flex items-center gap-1"><CheckCircle size={12} /> Saved</span>
+                <span className="text-xs text-emerald-400 flex items-center gap-1"><CheckCircle size={12} /> {t.app.saveSaved}</span>
             )}
             {lastSaveStatus === 'error' && (
-                <span className="text-xs text-red-400">Save Error</span>
+                <span className="text-xs text-red-400">{t.app.saveError}</span>
             )}
-            <span className="text-xs text-slate-600 ml-2">v2.6.0</span>
         </div>
       </header>
       
-      {/* Click outside to close menus - Backdrop z-40 is lower than active header z-50 */}
       {(showToolsMenu || showGridConfig || showBatchSettings) && (
         <div className="fixed inset-0 z-40" onClick={() => { setShowToolsMenu(false); setShowGridConfig(false); setShowBatchSettings(false); }}></div>
       )}
@@ -1312,6 +1260,7 @@ const App: React.FC = () => {
                         slideshowSettings={{ interval: gridConfig.interval, isPlaying: gridConfig.isPlaying }}
                         showModelLabels={showModelLabels}
                         labelsVisible={labelsVisible}
+                        t={t}
                     />
                 ) : (
                     <>
@@ -1328,6 +1277,7 @@ const App: React.FC = () => {
                             onSelectLabel={setCurrentLabelIdx}
                             onUpdateLabel={handleLabelUpdate}
                             onCreateLabel={handleLabelCreate}
+                            t={t}
                         />
                         <div 
                         onMouseDown={startResizing}
@@ -1350,6 +1300,7 @@ const App: React.FC = () => {
                             onToggleCreateMode={() => setIsCreating(prev => !prev)}
                             zoomSettings={zoomSettings}
                             onZoomSettingsChange={setZoomSettings}
+                            t={t}
                         />
                     </>
                 )}
@@ -1530,6 +1481,9 @@ const App: React.FC = () => {
             config={inferenceConfig}
             onConfigChange={setInferenceConfig}
             isBackendConnected={backendConnected}
+            modelOutputHandle={modelOutputHandle}
+            onModelOutputHandleChange={setModelOutputHandle}
+            t={t}
         />
       </div>
     </div>

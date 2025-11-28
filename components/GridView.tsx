@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { ImageAsset, YoloLabel } from '../types';
 import { parseYoloString, getColor } from '../utils/yoloHelper';
@@ -20,6 +19,7 @@ interface GridViewProps {
   slideshowSettings: { interval: number, isPlaying: boolean };
   showModelLabels?: boolean;
   labelsVisible?: boolean;
+  t: any;
 }
 
 // Helper Component: ZoomCell
@@ -47,61 +47,44 @@ const ZoomCell: React.FC<{
         const imgW = imgElement.naturalWidth;
         const imgH = imgElement.naturalHeight;
         
-        // 1. Calculate Initial Crop (Label + Context %)
         const expansionFactor = 1.1 + (zoomSettings.context / 100) * 4.0; 
         let cropW = label.w * expansionFactor;
         let cropH = label.h * expansionFactor;
 
-        // 2. Smart Aspect Ratio Adjustment
-        // We want the cropped area to basically fill a square (or the cell shape).
-        // Since we don't know the exact pixel size of the div here easily without ResizeObserver,
-        // we assume a Square (1:1) target ratio for the crop which is standard for grid cells.
-        // This ensures that if the defect is wide, we add vertical context, and vice versa.
-        const targetAspectRatio = 1; // Width / Height
+        const targetAspectRatio = 1; 
         const currentAspectRatio = (cropW * imgW) / (cropH * imgH);
 
         if (currentAspectRatio > targetAspectRatio) {
-            // Label is wider than target. Expand Height to match target ratio.
-            // New Height = Width / TargetRatio
             const newHeightPx = (cropW * imgW) / targetAspectRatio;
             cropH = newHeightPx / imgH;
         } else {
-            // Label is taller than target. Expand Width to match target ratio.
-            // New Width = Height * TargetRatio
             const newWidthPx = (cropH * imgH) * targetAspectRatio;
             cropW = newWidthPx / imgW;
         }
         
-        // 3. Calculate Boundaries & Clamp
         const cLeft = Math.max(0, label.x - cropW / 2);
         const cTop = Math.max(0, label.y - cropH / 2);
         
-        // Ensure crop doesn't exceed image dimensions on the right/bottom
         const finalW = Math.min(cropW, 1 - cLeft); 
         const finalH = Math.min(cropH, 1 - cTop);
 
-        // Pixels
         const pxLeft = cLeft * imgW;
         const pxTop = cTop * imgH;
         const pxWidth = finalW * imgW;
         const pxHeight = finalH * imgH;
         
-        // Set Canvas Size
         canvasRef.current.width = Math.max(1, pxWidth);
         canvasRef.current.height = Math.max(1, pxHeight);
         
-        // Draw
         ctx.clearRect(0, 0, pxWidth, pxHeight);
         ctx.drawImage(imgElement, pxLeft, pxTop, pxWidth, pxHeight, 0, 0, pxWidth, pxHeight);
 
-        // Draw Box
         const boxX = (label.x * imgW) - (label.w * imgW) / 2 - pxLeft;
         const boxY = (label.y * imgH) - (label.h * imgH) / 2 - pxTop;
         const boxW = label.w * imgW;
         const boxH = label.h * imgH;
 
         ctx.strokeStyle = getColor(label.classId);
-        // Scale stroke width relative to the CROP size, so it looks consistent regardless of zoom
         ctx.lineWidth = Math.max(2, Math.min(pxWidth, pxHeight) / 50); 
         
         if (label.isPredicted) ctx.setLineDash([ctx.lineWidth * 2, ctx.lineWidth * 2]);
@@ -139,25 +122,22 @@ export const GridView: React.FC<GridViewProps> = ({
   zoomSettings,
   slideshowSettings,
   showModelLabels = true,
-  labelsVisible = true
+  labelsVisible = true,
+  t
 }) => {
   const itemsPerPage = rows * cols;
   const currentPage = Math.floor(currentIndex / itemsPerPage);
   const startIdx = currentPage * itemsPerPage;
   
-  // Memoize visible images
   const visibleImages = useMemo(() => images.slice(startIdx, startIdx + itemsPerPage), [images, startIdx, itemsPerPage]);
 
-  // Active indices per image (for cycling defects)
   const [activeLabelIndices, setActiveLabelIndices] = useState<Record<number, number>>({});
-  // Hovered cell index
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
 
   useEffect(() => {
     setActiveLabelIndices({});
   }, [currentPage]);
 
-  // Helper to extract relevant labels based on visibility
   const getRelevantLabels = (img: ImageAsset) => {
       const key = img.name.replace(/\.[^/.]+$/, "");
       const rawContent = labelsRaw.get(key) || "";
@@ -166,7 +146,6 @@ export const GridView: React.FC<GridViewProps> = ({
       return [...savedLabels, ...cachedPredictions];
   };
 
-  // Slideshow Logic
   useEffect(() => {
     if (gridMode !== 'zoom' || !slideshowSettings.isPlaying) return;
 
@@ -175,7 +154,7 @@ export const GridView: React.FC<GridViewProps> = ({
         const next = { ...prev };
         visibleImages.forEach((img, i) => {
            const globalIdx = startIdx + i;
-           if (globalIdx === hoveredIndex) return; // Pause on hover
+           if (globalIdx === hoveredIndex) return; 
 
            const allLabels = getRelevantLabels(img);
            const total = allLabels.length;
@@ -204,20 +183,16 @@ export const GridView: React.FC<GridViewProps> = ({
       });
   };
 
-  // Render Logic
   const renderThumbnail = (img: ImageAsset, relativeIdx: number) => {
     const globalIdx = startIdx + relativeIdx;
     
-    // Get Merged & Filtered Labels
     const allLabels = getRelevantLabels(img);
 
     const isSelected = globalIdx === currentIndex;
     const activeLabelIdx = activeLabelIndices[globalIdx] || 0;
-    // Ensure index is valid if list changed
     const safeLabelIdx = activeLabelIdx < allLabels.length ? activeLabelIdx : 0;
     const currentLabel = allLabels[safeLabelIdx];
 
-    // --- ZOOM MODE ---
     if (gridMode === 'zoom') {
         const labelText = currentLabel 
             ? `${currentLabel.isPredicted ? 'M-' : ''}${classes[currentLabel.classId] || currentLabel.classId}` 
@@ -242,7 +217,6 @@ export const GridView: React.FC<GridViewProps> = ({
                    <img src={img.url} className="w-full h-full object-contain opacity-50" />
                 )}
 
-                {/* Overlay Info */}
                 <div className="absolute top-0 left-0 right-0 bg-black/40 p-1 flex justify-between items-center z-20 pointer-events-none">
                     <span className="text-[10px] text-white font-mono bg-black/50 px-1 rounded truncate max-w-[60%]">{img.name}</span>
                      {currentLabel && (
@@ -259,7 +233,6 @@ export const GridView: React.FC<GridViewProps> = ({
                      )}
                 </div>
                 
-                {/* Manual Navigation Overlay (On Hover) */}
                 {allLabels.length > 1 && hoveredIndex === globalIdx && (
                     <div className="absolute inset-x-0 bottom-0 top-6 flex items-center justify-between px-2 pointer-events-none">
                          <button 
@@ -280,7 +253,6 @@ export const GridView: React.FC<GridViewProps> = ({
                     </div>
                 )}
 
-                 {/* Defect Counter */}
                  <div className="absolute bottom-1 right-1 text-[10px] bg-black/60 text-slate-300 px-1.5 py-0.5 rounded backdrop-blur-md">
                      {allLabels.length > 0 ? `${safeLabelIdx + 1}/${allLabels.length}` : '0'}
                  </div>
@@ -288,7 +260,6 @@ export const GridView: React.FC<GridViewProps> = ({
         );
     }
 
-    // --- NORMAL GRID MODE ---
     return (
       <div 
         key={globalIdx}
@@ -378,7 +349,7 @@ export const GridView: React.FC<GridViewProps> = ({
         </div>
         
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-slate-800/90 border border-slate-600 px-4 py-2 rounded-full shadow-xl text-xs text-slate-300 pointer-events-none z-30">
-            Page {currentPage + 1} of {Math.ceil(images.length / itemsPerPage)} ({startIdx + 1} - {Math.min(startIdx + itemsPerPage, images.length)})
+            {t.app.page} {currentPage + 1} / {Math.ceil(images.length / itemsPerPage)} ({startIdx + 1} - {Math.min(startIdx + itemsPerPage, images.length)})
         </div>
     </div>
   );

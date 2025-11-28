@@ -17,6 +17,7 @@ interface ImageViewerProps {
   onSelectLabel: (index: number) => void;
   onUpdateLabel: (label: YoloLabel, index?: number) => void;
   onCreateLabel?: (label: YoloLabel) => void;
+  t?: any;
 }
 
 type ResizeHandle = 'tl' | 'tr' | 'bl' | 'br' | 'move' | null;
@@ -34,6 +35,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
   onSelectLabel,
   onUpdateLabel,
   onCreateLabel,
+  t
 }) => {
   const [transform, setTransform] = useState({ scale: 1, x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
@@ -307,19 +309,19 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                     onClick={() => setTransform({scale: 1, x: 0, y: 0})} 
                     className="bg-slate-800/80 hover:bg-slate-700 text-white p-2 rounded shadow-lg backdrop-blur text-xs font-bold flex items-center gap-2 border border-slate-600 transition-all pointer-events-auto"
                 >
-                    <RotateCcw size={14} /> Reset View
+                    <RotateCcw size={14} /> {t?.app?.resetView || "Reset View"}
                 </button>
             )}
         </div>
         
         {isCreating && (
              <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-indigo-600 text-white px-4 py-2 rounded-lg shadow-lg font-bold border border-white/20 animate-pulse pointer-events-none">
-                CREATE MODE (Draw a box)
+                {t?.app?.createMode || "CREATE MODE (Draw a box)"}
              </div>
         )}
         
         <div className="absolute bottom-4 left-4 z-50 text-slate-500 text-xs pointer-events-none select-none bg-black/20 p-1 rounded backdrop-blur-sm">
-            Ctrl + Scroll to Zoom • {isCreating ? 'Click & Drag to Create' : 'Drag to Pan'}
+            {t?.app?.panZoomInfo || "Ctrl + Scroll to Zoom • Drag to Pan"}
         </div>
 
       <div 
