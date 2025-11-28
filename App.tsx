@@ -527,6 +527,25 @@ const App: React.FC = () => {
             setPendingLabelIndex(null);
         }
 
+        // If we modified a prediction (making it manual), we must remove it from the prediction cache.
+        // Otherwise, the main useEffect will reload the manual (new) + cached (old) label, causing duplicates.
+        if (oldLabel.isPredicted) {
+            const currentImg = filteredImages[currentImageIdx];
+            if (currentImg) {
+                const key = currentImg.name.replace(/\.[^/.]+$/, "");
+                const remainingPredictions = newLabels.filter(l => l.isPredicted);
+                setPredictionsCache(prev => {
+                    const newMap = new Map(prev);
+                    if (remainingPredictions.length > 0) {
+                        newMap.set(key, remainingPredictions);
+                    } else {
+                        newMap.delete(key);
+                    }
+                    return newMap;
+                });
+            }
+        }
+
         updateRawDataAndSave(newLabels);
     }
   };
