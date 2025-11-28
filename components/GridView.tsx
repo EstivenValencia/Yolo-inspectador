@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { ImageAsset, YoloLabel } from '../types';
 import { parseYoloString, getColor, getLabelHash } from '../utils/yoloHelper';
@@ -324,7 +325,7 @@ export const GridView: React.FC<GridViewProps> = ({
         <div className="absolute inset-0 pointer-events-none">
             {allLabels.map((label, i) => {
                 const color = getColor(label.classId);
-                const borderStyle = label.isPredicted ? 'dotted' : 'solid';
+                const borderStyle = label.isPredicted ? 'dashed' : 'solid';
                 const opacity = label.isPredicted ? 0.8 : 0.9;
                 const className = classes[label.classId] || String(label.classId);
                 const displayName = label.isPredicted ? `M-${className}` : className;

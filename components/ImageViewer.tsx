@@ -20,7 +20,7 @@ interface ImageViewerProps {
   t?: any;
 }
 
-type ResizeHandle = 'tl' | 'tr' | 'bl' | 'br' | 'move' | null;
+type ResizeHandle = 'tl' | 'tr' | 'bl' | 'br' | 'move' | 'l' | 'r' | 't' | 'b' | null;
 
 export const ImageViewer: React.FC<ImageViewerProps> = ({
   image,
@@ -214,7 +214,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
             return;
         }
 
-        // CASE: RESIZING (Drag corners)
+        // CASE: RESIZING (Drag corners or edges)
         const currentLeft = start.x - start.w / 2;
         const currentRight = start.x + start.w / 2;
         const currentTop = start.y - start.h / 2;
@@ -352,24 +352,24 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
 
             const isSelected = idx === currentLabelIndex;
             const isPending = idx === pendingLabelIndex;
+            const isModel = label.isPredicted || isPending;
             
             const left = (label.x - label.w / 2) * 100;
             const top = (label.y - label.h / 2) * 100;
             const width = label.w * 100;
             const height = label.h * 100;
             
-            // USE DIFFERENT COLORS FOR MODEL VS MANUAL
+            // COLORS
             const color = isPending ? 'white' : (label.isPredicted ? getModelColor(label.classId) : getColor(label.classId));
             const borderColor = color;
-            const borderWidth = isSelected ? '3px' : '2px';
-            
-            // DASHED FOR MODEL, SOLID FOR MANUAL
-            const borderStyle = isPending ? 'dashed' : (label.isPredicted ? 'dashed' : 'solid'); 
-            
+            const borderWidthPx = isSelected ? 3 : 2;
+            const borderHitThickness = 12; // Invisible Hit area thickness for easier grabbing
+
+            // Z-Index and Opacity
             const opacityClass = isSelected ? 'opacity-100 z-50' : 'opacity-80 hover:opacity-100 z-10 hover:z-40';
-            const shadow = isSelected && !isPending ? `0 0 0 2px white, 0 0 10px ${color}` : (isPending ? '0 0 10px rgba(255,255,255,0.5)' : 'none');
             
-            // Special glow for model predictions
+            // Glows
+            const shadow = isSelected && !isPending ? `0 0 0 2px white, 0 0 10px ${color}` : (isPending ? '0 0 10px rgba(255,255,255,0.5)' : 'none');
             const modelGlow = label.isPredicted && !isSelected ? `0 0 8px ${color}` : shadow;
 
             // Generate Label Text
@@ -397,7 +397,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                   height: `${height}%`,
                 }}
               >
-                {/* Internal Fill */}
+                {/* Internal Fill (Drag Area) */}
                 {showBoxFill && !isCreating && !isPending && (
                   <div 
                      onMouseDown={(e) => startResize(e, 'move', label, idx)}
@@ -406,34 +406,75 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                   />
                 )}
 
-                {/* Borders for interaction */}
-                <div 
-                  onMouseDown={(e) => startResize(e, 'move', label, idx)}
-                  className={`absolute top-0 left-0 w-full ${!isCreating && 'cursor-move pointer-events-auto'}`}
-                  style={{ height: borderWidth, backgroundColor: borderColor, borderTopStyle: borderStyle, boxShadow: modelGlow, transform: 'translateY(-50%)' }}
-                />
-                <div 
-                  onMouseDown={(e) => startResize(e, 'move', label, idx)}
-                  className={`absolute bottom-0 left-0 w-full ${!isCreating && 'cursor-move pointer-events-auto'}`}
-                  style={{ height: borderWidth, backgroundColor: borderColor, borderBottomStyle: borderStyle, boxShadow: modelGlow, transform: 'translateY(50%)' }}
-                />
-                <div 
-                  onMouseDown={(e) => startResize(e, 'move', label, idx)}
-                  className={`absolute top-0 left-0 h-full ${!isCreating && 'cursor-move pointer-events-auto'}`}
-                  style={{ width: borderWidth, backgroundColor: borderColor, borderLeftStyle: borderStyle, boxShadow: modelGlow, transform: 'translateX(-50%)' }}
-                />
-                <div 
-                  onMouseDown={(e) => startResize(e, 'move', label, idx)}
-                  className={`absolute top-0 right-0 h-full ${!isCreating && 'cursor-move pointer-events-auto'}`}
-                  style={{ width: borderWidth, backgroundColor: borderColor, borderRightStyle: borderStyle, boxShadow: modelGlow, transform: 'translateX(50%)' }}
-                />
+                {/* 
+                   BORDERS - Refactored to separate HIT AREA from VISUAL LINE.
+                   This fixes the issue where clicking the gap in a dashed line triggers background events (creation/pan).
+                   The outer div is the hit area (solid, transparent, thick). 
+                   The inner div is the visual line (styled, thin).
+                */}
 
+                {/* TOP BORDER */}
+                <div 
+                  onMouseDown={(e) => startResize(e, 'move', label, idx)}
+                  className={`absolute top-0 left-0 w-full flex items-center justify-center ${!isCreating && 'cursor-move pointer-events-auto'}`}
+                  style={{ height: borderHitThickness, transform: 'translateY(-50%)', zIndex: 20 }}
+                >
+                    <div className="w-full" style={{ 
+                        height: isModel ? 0 : borderWidthPx, 
+                        backgroundColor: isModel ? 'transparent' : borderColor,
+                        borderTop: isModel ? `${borderWidthPx}px dashed ${borderColor}` : 'none',
+                        boxShadow: modelGlow 
+                    }} />
+                </div>
+
+                {/* BOTTOM BORDER */}
+                <div 
+                  onMouseDown={(e) => startResize(e, 'move', label, idx)}
+                  className={`absolute bottom-0 left-0 w-full flex items-center justify-center ${!isCreating && 'cursor-move pointer-events-auto'}`}
+                  style={{ height: borderHitThickness, transform: 'translateY(50%)', zIndex: 20 }}
+                >
+                    <div className="w-full" style={{ 
+                        height: isModel ? 0 : borderWidthPx, 
+                        backgroundColor: isModel ? 'transparent' : borderColor,
+                        borderBottom: isModel ? `${borderWidthPx}px dashed ${borderColor}` : 'none',
+                        boxShadow: modelGlow 
+                    }} />
+                </div>
+
+                {/* LEFT BORDER */}
+                <div 
+                  onMouseDown={(e) => startResize(e, 'move', label, idx)}
+                  className={`absolute top-0 left-0 h-full flex items-center justify-center ${!isCreating && 'cursor-move pointer-events-auto'}`}
+                  style={{ width: borderHitThickness, transform: 'translateX(-50%)', zIndex: 20 }}
+                >
+                    <div className="h-full" style={{ 
+                        width: isModel ? 0 : borderWidthPx, 
+                        backgroundColor: isModel ? 'transparent' : borderColor,
+                        borderLeft: isModel ? `${borderWidthPx}px dashed ${borderColor}` : 'none',
+                        boxShadow: modelGlow 
+                    }} />
+                </div>
+
+                {/* RIGHT BORDER */}
+                <div 
+                  onMouseDown={(e) => startResize(e, 'move', label, idx)}
+                  className={`absolute top-0 right-0 h-full flex items-center justify-center ${!isCreating && 'cursor-move pointer-events-auto'}`}
+                  style={{ width: borderHitThickness, transform: 'translateX(50%)', zIndex: 20 }}
+                >
+                    <div className="h-full" style={{ 
+                        width: isModel ? 0 : borderWidthPx, 
+                        backgroundColor: isModel ? 'transparent' : borderColor,
+                        borderRight: isModel ? `${borderWidthPx}px dashed ${borderColor}` : 'none',
+                        boxShadow: modelGlow 
+                    }} />
+                </div>
+
+                {/* LABEL TAG */}
                 {(isSelected || width > 0) && (
                    <div 
                     className={`absolute left-0 px-1.5 py-0.5 text-xs font-bold whitespace-nowrap rounded shadow-sm pointer-events-none transform ${isPending ? 'bg-white text-black' : 'bg-black/75 text-white'}`}
                     style={{ 
                         borderLeft: `4px solid ${color}`,
-                        // POSITION LOGIC: MANUAL ON TOP, MODEL ON BOTTOM
                         ...(label.isPredicted 
                             ? { top: '100%', marginTop: '4px', origin: 'top left' } 
                             : { bottom: '100%', marginBottom: '4px', origin: 'bottom left' }
@@ -444,17 +485,32 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                    </div>
                 )}
 
-                {/* Resize Handles */}
+                {/* RESIZE HANDLES (Corners and Edges) - Only when selected and not pending */}
                 {isSelected && !isCreating && !isPending && (
                   <>
-                    <div className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-white border border-black cursor-nwse-resize z-50 rounded-sm pointer-events-auto"
+                    {/* Corners */}
+                    <div className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-white border border-black cursor-nwse-resize z-50 rounded-sm pointer-events-auto shadow-sm"
                          onMouseDown={(e) => startResize(e, 'tl', label, idx)} />
-                    <div className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-white border border-black cursor-nesw-resize z-50 rounded-sm pointer-events-auto"
+                    <div className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-white border border-black cursor-nesw-resize z-50 rounded-sm pointer-events-auto shadow-sm"
                          onMouseDown={(e) => startResize(e, 'tr', label, idx)} />
-                    <div className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-white border border-black cursor-nesw-resize z-50 rounded-sm pointer-events-auto"
+                    <div className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-white border border-black cursor-nesw-resize z-50 rounded-sm pointer-events-auto shadow-sm"
                          onMouseDown={(e) => startResize(e, 'bl', label, idx)} />
-                    <div className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-white border border-black cursor-nwse-resize z-50 rounded-sm pointer-events-auto"
+                    <div className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-white border border-black cursor-nwse-resize z-50 rounded-sm pointer-events-auto shadow-sm"
                          onMouseDown={(e) => startResize(e, 'br', label, idx)} />
+                    
+                    {/* Edge Resizers (Transparent hit areas on top of the borders) */}
+                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-1/2 h-2 cursor-ns-resize z-50 pointer-events-auto"
+                         style={{ transform: 'translate(-50%, -50%)' }}
+                         onMouseDown={(e) => startResize(e, 't', label, idx)} />
+                    <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-1/2 h-2 cursor-ns-resize z-50 pointer-events-auto"
+                         style={{ transform: 'translate(-50%, 50%)' }}
+                         onMouseDown={(e) => startResize(e, 'b', label, idx)} />
+                    <div className="absolute left-0 top-1/2 -translate-y-1/2 h-1/2 w-2 cursor-ew-resize z-50 pointer-events-auto"
+                         style={{ transform: 'translate(-50%, -50%)' }}
+                         onMouseDown={(e) => startResize(e, 'l', label, idx)} />
+                    <div className="absolute right-0 top-1/2 -translate-y-1/2 h-1/2 w-2 cursor-ew-resize z-50 pointer-events-auto"
+                         style={{ transform: 'translate(50%, -50%)' }}
+                         onMouseDown={(e) => startResize(e, 'r', label, idx)} />
                   </>
                 )}
               </div>
