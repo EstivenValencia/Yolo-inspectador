@@ -160,8 +160,8 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
   const startResize = (e: React.MouseEvent, handle: ResizeHandle, label: YoloLabel, idx: number) => {
     focusViewer(); // Ensure focus when clicking a box too
     
-    if (isCreating) return; // Disable selection/resize while creating
-    e.stopPropagation(); // Prevent panning
+    // Allow resizing/moving even if in create mode to prevent accidental overlap creation
+    e.stopPropagation(); // Prevent panning or creation
     e.preventDefault();
     onSelectLabel(idx); // Ensure selection when clicking border/corner
     setResizing(handle);
@@ -407,17 +407,22 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                 )}
 
                 {/* 
-                   BORDERS - Refactored to separate HIT AREA from VISUAL LINE.
-                   This fixes the issue where clicking the gap in a dashed line triggers background events (creation/pan).
-                   The outer div is the hit area (solid, transparent, thick). 
-                   The inner div is the visual line (styled, thin).
+                   BORDERS - Refactored for Robust Interaction
+                   We use a hit-area div (outer) that is invisible but solid to capture events,
+                   and a visual div (inner) that renders the style (dashed/solid).
+                   Added rgba(0,0,0,0.01) bg to hit areas to ensure they capture clicks over background.
                 */}
 
                 {/* TOP BORDER */}
                 <div 
                   onMouseDown={(e) => startResize(e, 'move', label, idx)}
-                  className={`absolute top-0 left-0 w-full flex items-center justify-center ${!isCreating && 'cursor-move pointer-events-auto'}`}
-                  style={{ height: borderHitThickness, transform: 'translateY(-50%)', zIndex: 20 }}
+                  className="absolute top-0 left-0 w-full flex items-center justify-center cursor-move pointer-events-auto"
+                  style={{ 
+                      height: borderHitThickness, 
+                      transform: 'translateY(-50%)', 
+                      zIndex: 20,
+                      backgroundColor: 'rgba(255,255,255,0.01)' // Crucial for catching clicks on gaps
+                  }}
                 >
                     <div className="w-full" style={{ 
                         height: isModel ? 0 : borderWidthPx, 
@@ -430,8 +435,13 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                 {/* BOTTOM BORDER */}
                 <div 
                   onMouseDown={(e) => startResize(e, 'move', label, idx)}
-                  className={`absolute bottom-0 left-0 w-full flex items-center justify-center ${!isCreating && 'cursor-move pointer-events-auto'}`}
-                  style={{ height: borderHitThickness, transform: 'translateY(50%)', zIndex: 20 }}
+                  className="absolute bottom-0 left-0 w-full flex items-center justify-center cursor-move pointer-events-auto"
+                  style={{ 
+                      height: borderHitThickness, 
+                      transform: 'translateY(50%)', 
+                      zIndex: 20,
+                      backgroundColor: 'rgba(255,255,255,0.01)'
+                  }}
                 >
                     <div className="w-full" style={{ 
                         height: isModel ? 0 : borderWidthPx, 
@@ -444,8 +454,13 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                 {/* LEFT BORDER */}
                 <div 
                   onMouseDown={(e) => startResize(e, 'move', label, idx)}
-                  className={`absolute top-0 left-0 h-full flex items-center justify-center ${!isCreating && 'cursor-move pointer-events-auto'}`}
-                  style={{ width: borderHitThickness, transform: 'translateX(-50%)', zIndex: 20 }}
+                  className="absolute top-0 left-0 h-full flex items-center justify-center cursor-move pointer-events-auto"
+                  style={{ 
+                      width: borderHitThickness, 
+                      transform: 'translateX(-50%)', 
+                      zIndex: 20,
+                      backgroundColor: 'rgba(255,255,255,0.01)'
+                  }}
                 >
                     <div className="h-full" style={{ 
                         width: isModel ? 0 : borderWidthPx, 
@@ -458,8 +473,13 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                 {/* RIGHT BORDER */}
                 <div 
                   onMouseDown={(e) => startResize(e, 'move', label, idx)}
-                  className={`absolute top-0 right-0 h-full flex items-center justify-center ${!isCreating && 'cursor-move pointer-events-auto'}`}
-                  style={{ width: borderHitThickness, transform: 'translateX(50%)', zIndex: 20 }}
+                  className="absolute top-0 right-0 h-full flex items-center justify-center cursor-move pointer-events-auto"
+                  style={{ 
+                      width: borderHitThickness, 
+                      transform: 'translateX(50%)', 
+                      zIndex: 20,
+                      backgroundColor: 'rgba(255,255,255,0.01)'
+                  }}
                 >
                     <div className="h-full" style={{ 
                         width: isModel ? 0 : borderWidthPx, 
@@ -486,7 +506,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                 )}
 
                 {/* RESIZE HANDLES (Corners and Edges) - Only when selected and not pending */}
-                {isSelected && !isCreating && !isPending && (
+                {isSelected && !isPending && (
                   <>
                     {/* Corners */}
                     <div className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-white border border-black cursor-nwse-resize z-50 rounded-sm pointer-events-auto shadow-sm"
