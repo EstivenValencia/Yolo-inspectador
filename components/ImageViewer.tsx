@@ -484,12 +484,13 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                     onMouseDown={(e) => startResize(e, 'move', label, idx)}
                     className={`absolute left-0 font-bold whitespace-nowrap rounded shadow-sm pointer-events-auto cursor-pointer transform hover:scale-105 transition-transform ${isPending ? 'bg-white text-black' : 'bg-black/75 text-white'}`}
                     style={{ 
-                        fontSize: `${12 / scaleFactor}px`, // Scale text so it doesn't get huge/tiny
+                        zIndex: 60, // Higher than handles
+                        fontSize: `${11 / scaleFactor}px`, // Slight reduction
                         padding: `${2 / scaleFactor}px ${6 / scaleFactor}px`,
                         borderLeft: `${4 / scaleFactor}px solid ${color}`,
                         ...(label.isPredicted 
-                            ? { top: '100%', marginTop: `${4/scaleFactor}px`, origin: 'top left' } 
-                            : { bottom: '100%', marginBottom: `${4/scaleFactor}px`, origin: 'bottom left' }
+                            ? { top: '100%', marginTop: `${8/scaleFactor}px`, origin: 'top left' } // Increased margin to avoid overlap
+                            : { bottom: '100%', marginBottom: `${8/scaleFactor}px`, origin: 'bottom left' } // Increased margin to avoid overlap
                         )
                     }}
                    >

@@ -406,17 +406,11 @@ const App: React.FC = () => {
     }
 
     // 3. Get RAM Cache (Latest Predictions)
-    // Note: If we just saved, the cache is cleared for this image.
-    const cachedPredictions = predictionsCache.get(key) || [];
-
-    // Combine: Manual + ModelDisk + RAM
-    // Note: RAM predictions usually supersede disk predictions if they exist for the same image (new run).
-    // But here we'll just append. If logic requires RAM to replace Disk Model labels, we can check.
-    // For now, let's assume if RAM cache exists, we use it INSTEAD of disk model labels, to avoid duplicates if we haven't saved yet.
-    
+    // IMPORTANT: Check if key exists in cache map, not just if length > 0.
+    // This allows clearing predictions (empty array) to take precedence over disk.
     let effectiveModelLabels = modelLabelsFromDisk;
-    if (cachedPredictions.length > 0) {
-        effectiveModelLabels = cachedPredictions;
+    if (predictionsCache.has(key)) {
+        effectiveModelLabels = predictionsCache.get(key)!;
     }
 
     const mergedLabels = [...manualLabels, ...effectiveModelLabels];
@@ -505,8 +499,10 @@ const App: React.FC = () => {
 
   const handleLabelUpdate = (updatedLabel: YoloLabel, index?: number) => {
     const targetIdx = index !== undefined ? index : currentLabelIdx;
-
+    
+    // Create a new array to avoid mutating state directly
     const newLabels = [...currentLabels];
+    
     if (targetIdx >= 0 && targetIdx < newLabels.length) {
         const oldLabel = newLabels[targetIdx];
         
@@ -515,9 +511,7 @@ const App: React.FC = () => {
             if (className) recordClassUsage(className);
         }
 
-        // We do NOT strip isPredicted flag here. 
-        // We let it remain a prediction until accepted.
-        
+        // Apply update
         newLabels[targetIdx] = updatedLabel;
         setCurrentLabels(newLabels);
         
@@ -525,6 +519,7 @@ const App: React.FC = () => {
             setPendingLabelIndex(null);
         }
 
+        // Logic split: Predictions vs Manual
         if (updatedLabel.isPredicted) {
             // It's a modified prediction: Update Cache ONLY
             // We ensure the cache reflects this change so it persists in RAM across navigation
@@ -534,17 +529,15 @@ const App: React.FC = () => {
                 const remainingPredictions = newLabels.filter(l => l.isPredicted);
                 setPredictionsCache(prev => {
                     const newMap = new Map(prev);
-                    if (remainingPredictions.length > 0) {
-                        newMap.set(key, remainingPredictions);
-                    } else {
-                        newMap.delete(key);
-                    }
+                    // Always set the key if we have predictions, or if we want to store an empty list
+                    // to override disk. 
+                    newMap.set(key, remainingPredictions);
                     return newMap;
                 });
             }
-            // DO NOT SAVE TO DISK
+            // DO NOT SAVE TO DISK for predictions until accepted
         } else {
-             // It's a manual label: Save to disk
+             // It's a manual label: Save to disk immediately
              updateRawDataAndSave(newLabels);
         }
     }
@@ -748,11 +741,7 @@ const App: React.FC = () => {
                const remainingCached = newLabels.filter(l => l.isPredicted);
                setPredictionsCache(prev => {
                    const newMap = new Map(prev);
-                   if (remainingCached.length > 0) {
-                       newMap.set(key, remainingCached);
-                   } else {
-                       newMap.delete(key);
-                   }
+                   newMap.set(key, remainingCached); // Update cache with remaining
                    return newMap;
                });
           } else {
