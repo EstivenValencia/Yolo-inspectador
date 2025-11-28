@@ -41,6 +41,10 @@ const App: React.FC = () => {
   const [reviewedLabels, setReviewedLabels] = useState<Set<string>>(new Set()); // Set of "filename:hash"
   const [reviewsFileHandle, setReviewsFileHandle] = useState<FileSystemFileHandle | null>(null);
 
+  // Failure Tracking State
+  const [skippedImages, setSkippedImages] = useState<Set<string>>(new Set());
+  const [failureCounts, setFailureCounts] = useState<Map<string, number>>(new Map());
+
   // View State
   const [currentImageIdx, setCurrentImageIdx] = useState(0);
   const [currentLabelIdx, setCurrentLabelIdx] = useState(0);
@@ -206,6 +210,8 @@ const App: React.FC = () => {
     setCurrentImageIdx(0);
     setPredictionsCache(new Map());
     setModelOutputHandle(null); 
+    setSkippedImages(new Set());
+    setFailureCounts(new Map());
     
     // Load reviews
     if (dirHandle) {
@@ -222,6 +228,8 @@ const App: React.FC = () => {
           setCurrentLabels([]);
           setIsBatchActive(false);
           setReviewedLabels(new Set());
+          setSkippedImages(new Set());
+          setFailureCounts(new Map());
       }
   };
 
@@ -530,6 +538,9 @@ const App: React.FC = () => {
             const img = filteredImages[targetIdx];
             const key = img.name.replace(/\.[^/.]+$/, "");
             
+            // Skip images marked as failed
+            if (skippedImages.has(key)) continue;
+
             if (!predictionsCache.has(key)) {
                 return { idx: targetIdx, img };
             }
@@ -561,15 +572,41 @@ const App: React.FC = () => {
                          newMap.set(key, predictions); 
                          return newMap;
                      });
+                     
+                     // Reset failure count on success
+                     setFailureCounts(prev => {
+                        const newMap = new Map(prev);
+                        newMap.delete(key);
+                        return newMap;
+                     });
+
                  } catch (e) {
                      console.warn(`Bg inference failed for ${img.name}`, e);
+                     const key = img.name.replace(/\.[^/.]+$/, "");
+                     
+                     // Failure logic: Retry up to 2 times then skip
+                     setFailureCounts(prev => {
+                         const newMap = new Map(prev);
+                         const count = (newMap.get(key) || 0) + 1;
+                         newMap.set(key, count);
+                         
+                         if (count >= 2) {
+                             console.log(`Skipping image ${img.name} after ${count} failures.`);
+                             setSkippedImages(prevSet => {
+                                 const newSet = new Set(prevSet);
+                                 newSet.add(key);
+                                 return newSet;
+                             });
+                         }
+                         return newMap;
+                     });
                  }
              }
              setIsBackgroundProcessing(false);
         };
         processImage();
     }
-  }, [isBatchActive, backendConnected, isBackgroundProcessing, currentImageIdx, filteredImages, batchSettings, predictionsCache, inferenceConfig]);
+  }, [isBatchActive, backendConnected, isBackgroundProcessing, currentImageIdx, filteredImages, batchSettings, predictionsCache, inferenceConfig, skippedImages]);
 
 
   const handleAcceptPredictions = () => {
@@ -1426,70 +1463,70 @@ const App: React.FC = () => {
                     </div>
                     <div className="grid grid-cols-2 gap-x-8 gap-y-4">
                         <div className="space-y-4">
-                            <h3 className="text-sm font-bold text-slate-400 uppercase border-b border-slate-700 pb-2">Navigation</h3>
+                            <h3 className="text-sm font-bold text-slate-400 uppercase border-b border-slate-700 pb-2">{t.app.help.navTitle}</h3>
                             <div className="flex justify-between items-center text-sm">
-                                <span className="text-slate-300">Previous / Next Image</span>
+                                <span className="text-slate-300">{t.app.help.prevNextImg}</span>
                                 <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">A / D</span>
                             </div>
                              <div className="flex justify-between items-center text-sm">
-                                <span className="text-slate-300">Previous / Next Label</span>
+                                <span className="text-slate-300">{t.app.help.prevNextLabel}</span>
                                 <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">W / S</span>
                             </div>
                         </div>
                         <div className="space-y-4">
-                             <h3 className="text-sm font-bold text-slate-400 uppercase border-b border-slate-700 pb-2">Editing</h3>
+                             <h3 className="text-sm font-bold text-slate-400 uppercase border-b border-slate-700 pb-2">{t.app.help.editTitle}</h3>
                              <div className="flex justify-between items-center text-sm">
-                                <span className="text-slate-300">Create New Box</span>
+                                <span className="text-slate-300">{t.app.help.createBox}</span>
                                 <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">E</span>
                             </div>
                             <div className="flex justify-between items-center text-sm">
-                                <span className="text-slate-300">Delete Selected</span>
+                                <span className="text-slate-300">{t.app.help.deleteSel}</span>
                                 <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">Q</span>
                             </div>
                              <div className="flex justify-between items-center text-sm">
-                                <span className="text-slate-300">Change Class</span>
+                                <span className="text-slate-300">{t.app.help.changeClass}</span>
                                 <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">R</span>
                             </div>
                              <div className="flex justify-between items-center text-sm">
-                                <span className="text-emerald-300 font-bold">Auto-Detect (Single)</span>
+                                <span className="text-emerald-300 font-bold">{t.app.help.autoSingle}</span>
                                 <span className="font-mono bg-emerald-900/50 border border-emerald-500/50 px-2 py-1 rounded text-white">Z</span>
                             </div>
                              <div className="flex justify-between items-center text-sm">
-                                <span className="text-amber-300 font-bold">Confirm Predictions</span>
+                                <span className="text-amber-300 font-bold">{t.app.help.confirmPred}</span>
                                 <span className="font-mono bg-amber-900/50 border border-amber-500/50 px-2 py-1 rounded text-white">Y</span>
                             </div>
                         </div>
                         <div className="space-y-4">
-                             <h3 className="text-sm font-bold text-slate-400 uppercase border-b border-slate-700 pb-2">View Controls</h3>
+                             <h3 className="text-sm font-bold text-slate-400 uppercase border-b border-slate-700 pb-2">{t.app.help.viewTitle}</h3>
                              <div className="flex justify-between items-center text-sm">
-                                <span className="text-slate-300">Toggle Manual Labels</span>
+                                <span className="text-slate-300">{t.app.help.toggleManual}</span>
                                 <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">V</span>
                             </div>
                              <div className="flex justify-between items-center text-sm">
-                                <span className="text-slate-300">Toggle Model Labels</span>
+                                <span className="text-slate-300">{t.app.help.toggleModel}</span>
                                 <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">Ctrl + V</span>
                             </div>
                             <div className="flex justify-between items-center text-sm">
-                                <span className="text-indigo-300 font-bold">Toggle Auto-Detect</span>
+                                <span className="text-indigo-300 font-bold">{t.app.help.toggleAuto}</span>
                                 <span className="font-mono bg-indigo-900/50 border border-indigo-500/50 px-2 py-1 rounded text-white">Ctrl + Z</span>
                             </div>
                              <div className="flex justify-between items-center text-sm">
-                                <span className="text-slate-300">Toggle Box Fill</span>
+                                <span className="text-slate-300">{t.app.help.toggleFill}</span>
                                 <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">F</span>
                             </div>
                              <div className="flex justify-between items-center text-sm">
-                                <span className="text-slate-300">Zoom Image</span>
+                                <span className="text-slate-300">{t.app.help.zoomImg}</span>
                                 <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">Ctrl + Scroll</span>
                             </div>
                         </div>
                          <div className="space-y-4">
-                             <h3 className="text-sm font-bold text-slate-400 uppercase border-b border-slate-700 pb-2">General</h3>
+                             <h3 className="text-sm font-bold text-slate-400 uppercase border-b border-slate-700 pb-2">{t.app.help.genTitle}</h3>
                              <div className="flex justify-between items-center text-sm">
-                                <span className="text-slate-300">Toggle Help</span>
+                                <span className="text-slate-300">{t.app.help.toggleHelp}</span>
                                 <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">Ctrl + H</span>
                             </div>
                              <div className="flex justify-between items-center text-sm">
-                                <span className="text-slate-300">Cancel / Close</span>
+                                <span className="text-slate-300">{t.app.help.cancel}</span>
                                 <span className="font-mono bg-slate-700 px-2 py-1 rounded text-white">Esc</span>
                             </div>
                         </div>

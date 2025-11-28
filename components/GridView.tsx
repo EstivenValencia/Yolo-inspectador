@@ -266,7 +266,7 @@ export const GridView: React.FC<GridViewProps> = ({
                         <span className="text-[10px] text-white font-mono bg-black/50 px-1 rounded truncate max-w-[80px]">{img.name}</span>
                         {currentLabel && (
                             <span 
-                                className="text-[10px] font-bold px-1.5 rounded self-start"
+                                className="text-xs font-bold px-2 py-0.5 rounded self-start"
                                 style={{ 
                                     backgroundColor: getColor(currentLabel.classId),
                                     color: 'white',

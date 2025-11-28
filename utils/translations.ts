@@ -80,6 +80,26 @@ export const translations = {
         delay: "Delay (Throttle)",
         lookaheadDesc: "Images to pre-process ahead of current view.",
         delayDesc: "Pause between requests to save CPU/Network."
+      },
+      help: {
+        navTitle: "Navigation",
+        prevNextImg: "Previous / Next Image",
+        prevNextLabel: "Previous / Next Label",
+        editTitle: "Editing",
+        createBox: "Create New Box",
+        deleteSel: "Delete Selected",
+        changeClass: "Change Class",
+        autoSingle: "Auto-Detect (Single)",
+        confirmPred: "Confirm Predictions",
+        viewTitle: "View Controls",
+        toggleManual: "Toggle Manual Labels",
+        toggleModel: "Toggle Model Labels",
+        toggleAuto: "Toggle Auto-Detect",
+        toggleFill: "Toggle Box Fill",
+        zoomImg: "Zoom Image",
+        genTitle: "General",
+        toggleHelp: "Toggle Help",
+        cancel: "Cancel / Close"
       }
     },
     detail: {
@@ -112,7 +132,7 @@ export const translations = {
       overlapW: "Overlap Width Ratio",
       overlapH: "Overlap Height Ratio",
       outputFolder: "Output Folder for Predictions",
-      outputDesc: "This folder can be different from your manual labels folder. If NOT selected, it overwrites the manual labels folder.",
+      outputDesc: "This folder can be different from the manual labels folder. If this option is NOT defined, it will overwrite the files in your manual labels folder.",
       currentFolder: "Current",
       defaultFolder: "Default (Overwrites Manual Folder)",
       selectFolder: "Select Output Folder",
@@ -136,7 +156,7 @@ export const translations = {
       step4Title: "Configuration",
       step4Content: "Use the 'Tools' menu to change visualization settings. Use 'Grid Settings' to adjust zoom levels and slideshow speed. Open 'Backend Settings' (Wifi Icon) to configure the Python backend parameters.",
       step5Title: "Output Folders",
-      step5Content: "You can define a separate folder to save the model's accepted predictions in the Model Settings. If you do not define a specific output folder, the application will overwrite the files in your manual labels folder.",
+      step5Content: "You can configure a different folder to save the labels detected by the model in the Tools/Model section. If this option is not defined, it defaults to overwriting the files in the manual labels folder you selected at startup.",
       next: "Next",
       back: "Back",
       close: "Close"
@@ -223,6 +243,26 @@ export const translations = {
         delay: "Retraso (Espera)",
         lookaheadDesc: "Imágenes a pre-procesar delante de la vista actual.",
         delayDesc: "Pausa entre peticiones para ahorrar CPU/Red."
+      },
+      help: {
+        navTitle: "Navegación",
+        prevNextImg: "Imagen Anterior / Siguiente",
+        prevNextLabel: "Etiqueta Anterior / Siguiente",
+        editTitle: "Edición",
+        createBox: "Crear Nueva Caja",
+        deleteSel: "Eliminar Seleccionada",
+        changeClass: "Cambiar Clase",
+        autoSingle: "Auto-Detectar (Individual)",
+        confirmPred: "Confirmar Predicciones",
+        viewTitle: "Controles de Vista",
+        toggleManual: "Alternar Etiquetas Manuales",
+        toggleModel: "Alternar Etiquetas Modelo",
+        toggleAuto: "Alternar Auto-Detección",
+        toggleFill: "Alternar Relleno de Caja",
+        zoomImg: "Zoom Imagen",
+        genTitle: "General",
+        toggleHelp: "Alternar Ayuda",
+        cancel: "Cancelar / Cerrar"
       }
     },
     detail: {
@@ -255,7 +295,7 @@ export const translations = {
       overlapW: "Ratio Solapamiento Ancho",
       overlapH: "Ratio Solapamiento Alto",
       outputFolder: "Carpeta de Salida (Predicciones)",
-      outputDesc: "Esta carpeta puede ser diferente a la carpeta de etiquetas manuales. Si NO se selecciona, sobrescribe la carpeta manual.",
+      outputDesc: "La carpeta para guardar las etiquetas del modelo puede ser diferente a la carpeta de etiquetas que yo defino manualmente. Si no defino esta opción, se sobreescribe a las propias de la parte manual.",
       currentFolder: "Actual",
       defaultFolder: "Por Defecto (Sobrescribe Manual)",
       selectFolder: "Seleccionar Carpeta",
@@ -279,7 +319,7 @@ export const translations = {
       step4Title: "Configuración",
       step4Content: "Usa el menú 'Herr.' para opciones visuales. Usa 'Config. Matriz' para ajustar zoom y velocidad. Abre 'Config. Backend' (Icono Wifi) para configurar los parámetros del backend Python.",
       step5Title: "Carpetas de Salida",
-      step5Content: "Puedes definir una carpeta separada para guardar las predicciones aceptadas por el modelo en la Configuración del Modelo. Si no defines una carpeta de salida específica, la aplicación sobrescribirá los archivos en tu carpeta de etiquetas manuales.",
+      step5Content: "La carpeta para guardar las etiquetas del modelo puede ser diferente a la carpeta de etiquetas que tú defines manualmente. Si no defines esta opción en la configuración, se sobreescribe a las propias de la parte manual.",
       next: "Siguiente",
       back: "Atrás",
       close: "Cerrar"
