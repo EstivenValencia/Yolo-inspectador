@@ -8,7 +8,7 @@ import { GridView } from './components/GridView';
 import { ImageAsset, YoloLabel, FileSystemFileHandle, FileSystemDirectoryHandle } from './types';
 import { parseYoloString, serializeYoloString } from './utils/yoloHelper';
 import { detectObjects, BackendConfig, checkBackendHealth } from './utils/apiHelper';
-import { ArrowLeft, ArrowRight, Image as ImageIcon, Filter, CheckCircle, Save, PlusSquare, BoxSelect, Home, Search, Keyboard, X, PlusCircle, Wifi, WifiOff, FileCheck, PlayCircle, StopCircle, Loader2, Wrench, Eye, EyeOff, ChevronDown, Grid, Square, Settings, LayoutGrid, Zap, ZapOff, Sliders, MonitorPlay, ZoomIn, Clock } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Image as ImageIcon, Filter, CheckCircle, Save, PlusSquare, BoxSelect, Home, Search, Keyboard, X, PlusCircle, Wifi, WifiOff, FileCheck, Loader2, Wrench, Eye, EyeOff, ChevronDown, Grid, Square, Settings, LayoutGrid, Zap, ZapOff, Sliders, ZoomIn, Clock } from 'lucide-react';
 
 const App: React.FC = () => {
   const [isSetup, setIsSetup] = useState(false);
@@ -33,7 +33,7 @@ const App: React.FC = () => {
   
   // View Mode & Grid Config
   const [viewMode, setViewMode] = useState<'single' | 'grid'>('single');
-  const [gridMode, setGridMode] = useState<'normal' | 'zoom'>('normal'); // New Grid Mode
+  const [gridMode, setGridMode] = useState<'normal' | 'zoom'>('normal'); 
   const [gridConfig, setGridConfig] = useState({ 
       rows: 3, 
       cols: 4,
@@ -226,7 +226,6 @@ const App: React.FC = () => {
   // Reset index when filter changes
   useEffect(() => {
     setCurrentImageIdx(0);
-    // Note: We do NOT stop batch inference here. The background worker should adapt to the new list.
   }, [filterClassId]);
 
   // --- Filter Logic for Class Selector ---
@@ -358,8 +357,6 @@ const App: React.FC = () => {
             if (className) recordClassUsage(className);
         }
 
-        // If modifying a predicted label, it effectively becomes "accepted"
-        // We remove the predicted flag if the user manually edits it
         if (updatedLabel.isPredicted) {
              updatedLabel.isPredicted = false;
         }
@@ -417,10 +414,6 @@ const App: React.FC = () => {
             newMap.set(key, predictions);
             return newMap;
         });
-
-        if (predictions.length === 0) {
-            // Optional: Small toast saying "No objects detected"
-        }
     } catch (e) {
         console.error("Inference failed", e);
         alert("Inference failed. Is the Python backend running?");
@@ -483,8 +476,6 @@ const App: React.FC = () => {
                      });
                  } catch (e) {
                      console.warn(`Bg inference failed for ${img.name}`, e);
-                     // Optional: Mark as error or ignore to retry? 
-                     // For now we don't set cache, so it might retry.
                  }
              }
              // Unlock
@@ -496,9 +487,6 @@ const App: React.FC = () => {
 
 
   const handleAcceptPredictions = () => {
-      // Logic: Take all labels marked as 'isPredicted', strip the flag, and save to disk.
-      // Also clear them from the cache so they don't double up.
-      
       const hasPredictions = currentLabels.some(l => l.isPredicted);
       if (!hasPredictions) return;
 
@@ -572,8 +560,6 @@ const App: React.FC = () => {
               setCurrentLabelIdx(-1);
           }
           
-          // Only write to disk if it wasn't a predicted label (predicted labels aren't on disk yet)
-          // But if we delete a normal label, we must save.
           if (!labelToDelete.isPredicted) {
               updateRawDataAndSave(newLabels);
           }
@@ -585,7 +571,6 @@ const App: React.FC = () => {
 
       const imgKey = filteredImages[currentImageIdx].name.replace(/\.[^/.]+$/, "");
       
-      // CRITICAL: Filter out predictions so they are NOT saved to disk unless explicitly accepted (forceSavePredictions)
       const labelsToSave = forceSavePredictions 
         ? newLabels 
         : newLabels.filter(l => !l.isPredicted);

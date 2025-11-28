@@ -1,5 +1,5 @@
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { ImageAsset, YoloLabel } from '../types';
 import { parseYoloString, getColor } from '../utils/yoloHelper';
 import { Maximize2, ChevronLeft, ChevronRight, Pause } from 'lucide-react';
@@ -20,6 +20,80 @@ interface GridViewProps {
   slideshowSettings: { interval: number, isPlaying: boolean };
 }
 
+// Helper Component: ZoomCell
+const ZoomCell: React.FC<{
+    image: ImageAsset, 
+    label: YoloLabel, 
+    zoomSettings: { context: number, mag: number },
+    className?: string
+}> = ({ image, label, zoomSettings, className }) => {
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const [imgElement, setImgElement] = useState<HTMLImageElement | null>(null);
+
+    useEffect(() => {
+        const img = new Image();
+        img.src = image.url;
+        img.onload = () => setImgElement(img);
+    }, [image.url]);
+
+    useEffect(() => {
+        if (!label || !imgElement || !canvasRef.current) return;
+        
+        const ctx = canvasRef.current.getContext('2d');
+        if (!ctx) return;
+        
+        const imgW = imgElement.naturalWidth;
+        const imgH = imgElement.naturalHeight;
+        
+        const expansionFactor = 1.1 + (zoomSettings.context / 100) * 4.0; 
+        const cropW = label.w * expansionFactor;
+        const cropH = label.h * expansionFactor;
+        
+        // Boundaries
+        const cLeft = Math.max(0, label.x - cropW / 2);
+        const cTop = Math.max(0, label.y - cropH / 2);
+        // Ensure we don't go out of bounds (though canvas drawImage handles src coordinates gracefully usually, explicit is better)
+        
+        // Pixels
+        const pxLeft = cLeft * imgW;
+        const pxTop = cTop * imgH;
+        const pxWidth = cropW * imgW; // Use calculated width from expansion
+        const pxHeight = cropH * imgH;
+        
+        canvasRef.current.width = Math.max(1, pxWidth);
+        canvasRef.current.height = Math.max(1, pxHeight);
+        
+        ctx.clearRect(0, 0, pxWidth, pxHeight);
+        ctx.drawImage(imgElement, pxLeft, pxTop, pxWidth, pxHeight, 0, 0, pxWidth, pxHeight);
+
+        // Draw Box
+        const boxX = (label.x * imgW) - (label.w * imgW) / 2 - pxLeft;
+        const boxY = (label.y * imgH) - (label.h * imgH) / 2 - pxTop;
+        const boxW = label.w * imgW;
+        const boxH = label.h * imgH;
+
+        ctx.strokeStyle = getColor(label.classId);
+        ctx.lineWidth = Math.max(2, Math.min(pxWidth, pxHeight) / 50); 
+        if (label.isPredicted) ctx.setLineDash([5, 5]);
+        else ctx.setLineDash([]);
+        ctx.strokeRect(boxX, boxY, boxW, boxH);
+
+    }, [label, imgElement, zoomSettings]);
+
+    return (
+        <div className={`${className} flex items-center justify-center bg-black overflow-hidden`}>
+            <canvas 
+                ref={canvasRef} 
+                className="max-w-full max-h-full object-contain"
+                style={{ 
+                    imageRendering: 'pixelated',
+                    transform: `scale(${zoomSettings.mag})`
+                }} 
+            />
+        </div>
+    );
+};
+
 export const GridView: React.FC<GridViewProps> = ({
   images,
   currentIndex,
@@ -37,7 +111,9 @@ export const GridView: React.FC<GridViewProps> = ({
   const itemsPerPage = rows * cols;
   const currentPage = Math.floor(currentIndex / itemsPerPage);
   const startIdx = currentPage * itemsPerPage;
-  const visibleImages = images.slice(startIdx, startIdx + itemsPerPage);
+  
+  // Memoize visible images to prevent unnecessary effect resets
+  const visibleImages = useMemo(() => images.slice(startIdx, startIdx + itemsPerPage), [images, startIdx, itemsPerPage]);
 
   // Map to track which defect index is currently shown for each image
   const [activeLabelIndices, setActiveLabelIndices] = useState<Record<number, number>>({});
@@ -115,7 +191,7 @@ export const GridView: React.FC<GridViewProps> = ({
                 onMouseLeave={() => setHoveredIndex(null)}
                 className={`relative bg-slate-900 border-2 rounded overflow-hidden cursor-pointer group transition-all ${isSelected ? 'border-indigo-500 ring-2 ring-indigo-500/50' : 'border-slate-700 hover:border-slate-500'}`}
             >
-                {allLabels.length > 0 ? (
+                {currentLabel ? (
                     <ZoomCell 
                         image={img}
                         label={currentLabel}
@@ -128,9 +204,9 @@ export const GridView: React.FC<GridViewProps> = ({
                 )}
 
                 {/* Info Overlay */}
-                <div className="absolute top-0 left-0 right-0 bg-black/40 p-1 flex justify-between items-center z-20">
+                <div className="absolute top-0 left-0 right-0 bg-black/40 p-1 flex justify-between items-center z-20 pointer-events-none">
                     <span className="text-[10px] text-white font-mono bg-black/50 px-1 rounded truncate max-w-[70%]">{img.name}</span>
-                     {allLabels.length > 0 && (
+                     {currentLabel && (
                          <span 
                             className="text-[10px] font-bold px-1.5 rounded"
                             style={{ 
@@ -269,81 +345,4 @@ export const GridView: React.FC<GridViewProps> = ({
         </div>
     </div>
   );
-};
-
-// --- Helper Component: ZoomCell ---
-// Encapsulates Canvas logic to prevent heavy re-renders on the parent list
-const ZoomCell: React.FC<{
-    image: ImageAsset, 
-    label: YoloLabel, 
-    zoomSettings: { context: number, mag: number },
-    className?: string
-}> = ({ image, label, zoomSettings, className }) => {
-    const canvasRef = useRef<HTMLCanvasElement>(null);
-    const [imgElement, setImgElement] = useState<HTMLImageElement | null>(null);
-
-    useEffect(() => {
-        const img = new Image();
-        img.src = image.url;
-        img.onload = () => setImgElement(img);
-    }, [image.url]);
-
-    useEffect(() => {
-        if (!label || !imgElement || !canvasRef.current) return;
-        
-        const ctx = canvasRef.current.getContext('2d');
-        if (!ctx) return;
-        
-        // Similar crop logic to DetailPanel
-        const imgW = imgElement.naturalWidth;
-        const imgH = imgElement.naturalHeight;
-        
-        const expansionFactor = 1.1 + (zoomSettings.context / 100) * 4.0; 
-        const cropW = label.w * expansionFactor;
-        const cropH = label.h * expansionFactor;
-        
-        // Boundaries
-        const cLeft = Math.max(0, label.x - cropW / 2);
-        const cTop = Math.max(0, label.y - cropH / 2);
-        const cRight = Math.min(1, label.x + cropW / 2);
-        const cBottom = Math.min(1, label.y + cropH / 2);
-        
-        // Pixels
-        const pxLeft = cLeft * imgW;
-        const pxTop = cTop * imgH;
-        const pxWidth = (cRight - cLeft) * imgW;
-        const pxHeight = (cBottom - cTop) * imgH;
-        
-        canvasRef.current.width = Math.max(1, pxWidth);
-        canvasRef.current.height = Math.max(1, pxHeight);
-        
-        ctx.clearRect(0, 0, pxWidth, pxHeight);
-        ctx.drawImage(imgElement, pxLeft, pxTop, pxWidth, pxHeight, 0, 0, pxWidth, pxHeight);
-
-        // Draw Box
-        const boxX = (label.x * imgW) - (label.w * imgW) / 2 - pxLeft;
-        const boxY = (label.y * imgH) - (label.h * imgH) / 2 - pxTop;
-        const boxW = label.w * imgW;
-        const boxH = label.h * imgH;
-
-        ctx.strokeStyle = getColor(label.classId);
-        ctx.lineWidth = Math.max(2, Math.min(pxWidth, pxHeight) / 50); 
-        if (label.isPredicted) ctx.setLineDash([5, 5]);
-        else ctx.setLineDash([]);
-        ctx.strokeRect(boxX, boxY, boxW, boxH);
-
-    }, [label, imgElement, zoomSettings]);
-
-    return (
-        <div className={`${className} flex items-center justify-center bg-black overflow-hidden`}>
-            <canvas 
-                ref={canvasRef} 
-                className="max-w-full max-h-full object-contain"
-                style={{ 
-                    imageRendering: 'pixelated',
-                    transform: `scale(${zoomSettings.mag})`
-                }} 
-            />
-        </div>
-    );
 };
