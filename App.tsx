@@ -845,7 +845,11 @@ const App: React.FC = () => {
 
   return (
     <div className="h-screen w-screen flex flex-col bg-slate-950 overflow-hidden relative">
-      <header className="h-16 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-6 shrink-0 z-20">
+      <header 
+        className={`h-16 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-6 shrink-0 transition-all ${
+            showToolsMenu || showGridConfig || showBatchSettings ? 'z-50' : 'z-20'
+        }`}
+      >
         <div className="flex items-center gap-4">
             <button 
                 onClick={handleHome}
@@ -899,14 +903,16 @@ const App: React.FC = () => {
                     onClick={(e) => {
                         e.stopPropagation();
                         setShowBatchSettings(!showBatchSettings);
+                        setShowGridConfig(false);
+                        setShowToolsMenu(false);
                     }}
                     className="px-2 py-1.5 rounded-r-md hover:bg-slate-600 text-slate-400 hover:text-white transition-colors"
                     title="Batch Settings"
                 >
                     <Sliders size={14} />
-                 </button>
+                </button>
 
-                 {/* Batch Settings Popover */}
+                {/* Batch Settings Popover */}
                  {showBatchSettings && (
                     <div 
                         className="absolute top-full right-0 mt-2 bg-slate-800 border border-slate-600 rounded-lg shadow-xl z-50 p-4 w-56"
@@ -983,6 +989,8 @@ const App: React.FC = () => {
                     onClick={(e) => {
                         e.stopPropagation();
                         setShowGridConfig(!showGridConfig);
+                        setShowBatchSettings(false);
+                        setShowToolsMenu(false);
                     }}
                     className="px-2 py-1.5 rounded-r-md hover:bg-slate-600 text-slate-400 hover:text-white transition-colors"
                     title="Grid Settings"
@@ -1122,6 +1130,8 @@ const App: React.FC = () => {
                     onClick={(e) => {
                         e.stopPropagation();
                         setShowToolsMenu(!showToolsMenu);
+                        setShowGridConfig(false);
+                        setShowBatchSettings(false);
                     }}
                     className="flex items-center gap-2 px-3 py-1.5 rounded text-xs font-bold bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
                 >
@@ -1241,7 +1251,7 @@ const App: React.FC = () => {
         </div>
       </header>
       
-      {/* Click outside to close menus */}
+      {/* Click outside to close menus - Backdrop z-40 is lower than active header z-50 */}
       {(showToolsMenu || showGridConfig || showBatchSettings) && (
         <div className="fixed inset-0 z-40" onClick={() => { setShowToolsMenu(false); setShowGridConfig(false); setShowBatchSettings(false); }}></div>
       )}
