@@ -509,17 +509,15 @@ const App: React.FC = () => {
     const newLabels = [...currentLabels];
     if (targetIdx >= 0 && targetIdx < newLabels.length) {
         const oldLabel = newLabels[targetIdx];
-        const oldClassId = oldLabel.classId;
         
-        if (oldClassId !== updatedLabel.classId) {
+        if (oldLabel.classId !== updatedLabel.classId) {
             const className = classes[updatedLabel.classId];
             if (className) recordClassUsage(className);
         }
 
-        if (updatedLabel.isPredicted) {
-             updatedLabel.isPredicted = false;
-        }
-
+        // We do NOT strip isPredicted flag here. 
+        // We let it remain a prediction until accepted.
+        
         newLabels[targetIdx] = updatedLabel;
         setCurrentLabels(newLabels);
         
@@ -527,9 +525,9 @@ const App: React.FC = () => {
             setPendingLabelIndex(null);
         }
 
-        // If we modified a prediction (making it manual), we must remove it from the prediction cache.
-        // Otherwise, the main useEffect will reload the manual (new) + cached (old) label, causing duplicates.
-        if (oldLabel.isPredicted) {
+        if (updatedLabel.isPredicted) {
+            // It's a modified prediction: Update Cache ONLY
+            // We ensure the cache reflects this change so it persists in RAM across navigation
             const currentImg = filteredImages[currentImageIdx];
             if (currentImg) {
                 const key = currentImg.name.replace(/\.[^/.]+$/, "");
@@ -544,9 +542,11 @@ const App: React.FC = () => {
                     return newMap;
                 });
             }
+            // DO NOT SAVE TO DISK
+        } else {
+             // It's a manual label: Save to disk
+             updateRawDataAndSave(newLabels);
         }
-
-        updateRawDataAndSave(newLabels);
     }
   };
 
@@ -742,6 +742,7 @@ const App: React.FC = () => {
           newLabels.splice(currentLabelIdx, 1);
           
           if (labelToDelete.isPredicted) {
+               // Update cache only, do NOT save to disk
                const currentImg = filteredImages[currentImageIdx];
                const key = currentImg.name.replace(/\.[^/.]+$/, "");
                const remainingCached = newLabels.filter(l => l.isPredicted);
@@ -754,6 +755,9 @@ const App: React.FC = () => {
                    }
                    return newMap;
                });
+          } else {
+               // Update disk
+               updateRawDataAndSave(newLabels);
           }
 
           setCurrentLabels(newLabels);
@@ -764,9 +768,6 @@ const App: React.FC = () => {
           } else {
               setCurrentLabelIdx(-1);
           }
-          
-          // Save changes (Delete applies to both types)
-          updateRawDataAndSave(newLabels);
       }
   };
 
