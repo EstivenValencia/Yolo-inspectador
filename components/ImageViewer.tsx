@@ -295,12 +295,67 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
 
   // --- DYNAMIC SCALING CALCULATIONS ---
   const scaleFactor = transform.scale;
-  const hitAreaSize = 20 / scaleFactor; 
-  const visualBorderBase = 2 / scaleFactor;
-  const visualBorderSelected = 3 / scaleFactor;
-  const handleSize = 10 / scaleFactor;
-  const handleOffset = -(handleSize / 2);
-  const hitAreaColor = 'rgba(255, 255, 255, 0.01)';
+  
+  // Dimensions in Screen Pixels
+  // Larger hit area for easier grabbing
+  const SCREEN_HIT_AREA = 24; 
+  // Smaller visual handle to stay sharp
+  const SCREEN_VISUAL_HANDLE = 7; 
+  const SCREEN_BORDER = 2;
+  const SCREEN_BORDER_SELECTED = 2.5;
+
+  // Scaled Dimensions (for React inline styles)
+  const hitAreaSize = SCREEN_HIT_AREA / scaleFactor; 
+  const visualHandleSize = SCREEN_VISUAL_HANDLE / scaleFactor;
+  const borderW = SCREEN_BORDER / scaleFactor;
+  const borderSelectedW = SCREEN_BORDER_SELECTED / scaleFactor;
+  
+  // Offset to center the hit area on the corner
+  const handleOffset = -(hitAreaSize / 2);
+  
+  // Color for the hit area (transparent)
+  const hitAreaColor = 'rgba(255, 0, 0, 0.0)'; 
+
+  // Helper to render a corner handle
+  const renderCornerHandle = (type: ResizeHandle, cursor: string, top?: number, bottom?: number, left?: number, right?: number, label?: YoloLabel, idx?: number) => (
+    <div
+        onMouseDown={(e) => startResize(e, type, label!, idx!)}
+        className={`absolute z-[100] group flex items-center justify-center pointer-events-auto cursor-${cursor}-resize`}
+        style={{
+            top: top !== undefined ? top : 'auto',
+            bottom: bottom !== undefined ? bottom : 'auto',
+            left: left !== undefined ? left : 'auto',
+            right: right !== undefined ? right : 'auto',
+            width: hitAreaSize,
+            height: hitAreaSize,
+            backgroundColor: hitAreaColor,
+        }}
+    >
+        {/* The Visual White Box */}
+        <div 
+            className="bg-white border border-black shadow-sm transition-transform duration-100 group-hover:scale-[1.75]"
+            style={{ width: visualHandleSize, height: visualHandleSize }} 
+        />
+    </div>
+  );
+
+  // Helper to render an edge handle
+  const renderEdgeHandle = (type: ResizeHandle, cursor: string, style: React.CSSProperties, label?: YoloLabel, idx?: number) => (
+    <div
+        onMouseDown={(e) => startResize(e, type, label!, idx!)}
+        className={`absolute z-[90] group flex items-center justify-center pointer-events-auto cursor-${cursor}-resize`}
+        style={{ ...style, backgroundColor: hitAreaColor }}
+    >
+        {/* Visual Line/Dot indicator for edge - expands on hover */}
+        <div 
+            className="bg-white/90 shadow-sm transition-transform duration-100 group-hover:scale-150 rounded-full"
+            style={{ 
+                width: (type === 'l' || type === 'r') ? borderSelectedW : visualHandleSize, 
+                height: (type === 't' || type === 'b') ? borderSelectedW : visualHandleSize,
+             }} 
+        />
+    </div>
+  );
 
   return (
     <div 
@@ -363,7 +418,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
             
             const color = isPending ? 'white' : (label.isPredicted ? getModelColor(label.classId) : getColor(label.classId));
             
-            const borderW = isSelected ? visualBorderSelected : visualBorderBase;
+            const currentBorderW = isSelected ? borderSelectedW : borderW;
             const hitW = hitAreaSize;
 
             const opacityClass = isSelected ? 'opacity-100 z-50' : 'opacity-80 hover:opacity-100 z-10 hover:z-40';
@@ -402,58 +457,40 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                   />
                 )}
 
-                {/* HIT AREAS & BORDERS */}
+                {/* VISUAL BORDERS (Purely visual, not for interaction) */}
+                <div className="absolute inset-0 pointer-events-none" style={{
+                    border: isModel ? `${currentBorderW}px dashed ${color}` : `${currentBorderW}px solid ${color}`,
+                    boxShadow: modelGlow
+                }} />
+
+                {/* EDGE HIT AREAS */}
                 {/* TOP */}
                 <div 
                   onMouseDown={(e) => startResize(e, 'move', label, idx)}
                   className="absolute top-0 left-0 w-full flex items-center justify-center cursor-move pointer-events-auto"
-                  style={{ height: hitW, transform: 'translateY(-50%)', zIndex: 20, backgroundColor: hitAreaColor }}
-                >
-                    <div className="w-full" style={{ 
-                        height: borderW, 
-                        borderTop: isModel ? `${borderW}px dashed ${color}` : `${borderW}px solid ${color}`,
-                        boxShadow: modelGlow 
-                    }} />
-                </div>
-
+                  style={{ height: hitW, transform: 'translateY(-50%)', zIndex: 60, backgroundColor: hitAreaColor }}
+                />
+                
                 {/* BOTTOM */}
                 <div 
                   onMouseDown={(e) => startResize(e, 'move', label, idx)}
                   className="absolute bottom-0 left-0 w-full flex items-center justify-center cursor-move pointer-events-auto"
-                  style={{ height: hitW, transform: 'translateY(50%)', zIndex: 20, backgroundColor: hitAreaColor }}
-                >
-                    <div className="w-full" style={{ 
-                        height: borderW, 
-                        borderBottom: isModel ? `${borderW}px dashed ${color}` : `${borderW}px solid ${color}`,
-                        boxShadow: modelGlow 
-                    }} />
-                </div>
+                  style={{ height: hitW, transform: 'translateY(50%)', zIndex: 60, backgroundColor: hitAreaColor }}
+                />
 
                 {/* LEFT */}
                 <div 
                   onMouseDown={(e) => startResize(e, 'move', label, idx)}
                   className="absolute top-0 left-0 h-full flex items-center justify-center cursor-move pointer-events-auto"
-                  style={{ width: hitW, transform: 'translateX(-50%)', zIndex: 20, backgroundColor: hitAreaColor }}
-                >
-                    <div className="h-full" style={{ 
-                        width: borderW, 
-                        borderLeft: isModel ? `${borderW}px dashed ${color}` : `${borderW}px solid ${color}`,
-                        boxShadow: modelGlow 
-                    }} />
-                </div>
+                  style={{ width: hitW, transform: 'translateX(-50%)', zIndex: 60, backgroundColor: hitAreaColor }}
+                />
 
                 {/* RIGHT */}
                 <div 
                   onMouseDown={(e) => startResize(e, 'move', label, idx)}
                   className="absolute top-0 right-0 h-full flex items-center justify-center cursor-move pointer-events-auto"
-                  style={{ width: hitW, transform: 'translateX(50%)', zIndex: 20, backgroundColor: hitAreaColor }}
-                >
-                    <div className="h-full" style={{ 
-                        width: borderW, 
-                        borderRight: isModel ? `${borderW}px dashed ${color}` : `${borderW}px solid ${color}`,
-                        boxShadow: modelGlow 
-                    }} />
-                </div>
+                  style={{ width: hitW, transform: 'translateX(50%)', zIndex: 60, backgroundColor: hitAreaColor }}
+                />
 
                 {/* LABEL TAG */}
                 {(isSelected || width > 0) && (
@@ -461,7 +498,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                     onMouseDown={(e) => startResize(e, 'move', label, idx)}
                     className={`absolute left-0 font-bold whitespace-nowrap rounded shadow-sm pointer-events-auto cursor-pointer transform hover:scale-105 transition-transform ${isPending ? 'bg-white text-black' : 'bg-black/75 text-white'}`}
                     style={{ 
-                        zIndex: 60,
+                        zIndex: 70,
                         fontSize: `${11 / scaleFactor}px`,
                         padding: `${2 / scaleFactor}px ${6 / scaleFactor}px`,
                         borderLeft: `${4 / scaleFactor}px solid ${color}`,
@@ -478,31 +515,17 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                 {/* RESIZE HANDLES - Only when selected and not pending */}
                 {isSelected && !isPending && (
                   <>
-                    <div className="absolute bg-white border border-black cursor-nwse-resize z-50 rounded-sm pointer-events-auto shadow-sm hover:scale-125 transition-transform"
-                         style={{ top: handleOffset, left: handleOffset, width: handleSize, height: handleSize }}
-                         onMouseDown={(e) => startResize(e, 'tl', label, idx)} />
-                    <div className="absolute bg-white border border-black cursor-nesw-resize z-50 rounded-sm pointer-events-auto shadow-sm hover:scale-125 transition-transform"
-                         style={{ top: handleOffset, right: handleOffset, width: handleSize, height: handleSize }}
-                         onMouseDown={(e) => startResize(e, 'tr', label, idx)} />
-                    <div className="absolute bg-white border border-black cursor-nesw-resize z-50 rounded-sm pointer-events-auto shadow-sm hover:scale-125 transition-transform"
-                         style={{ bottom: handleOffset, left: handleOffset, width: handleSize, height: handleSize }}
-                         onMouseDown={(e) => startResize(e, 'bl', label, idx)} />
-                    <div className="absolute bg-white border border-black cursor-nwse-resize z-50 rounded-sm pointer-events-auto shadow-sm hover:scale-125 transition-transform"
-                         style={{ bottom: handleOffset, right: handleOffset, width: handleSize, height: handleSize }}
-                         onMouseDown={(e) => startResize(e, 'br', label, idx)} />
+                    {/* Corners */}
+                    {renderCornerHandle('tl', 'nwse', handleOffset, undefined, handleOffset, undefined, label, idx)}
+                    {renderCornerHandle('tr', 'nesw', handleOffset, undefined, undefined, handleOffset, label, idx)}
+                    {renderCornerHandle('bl', 'nesw', undefined, handleOffset, handleOffset, undefined, label, idx)}
+                    {renderCornerHandle('br', 'nwse', undefined, handleOffset, undefined, handleOffset, label, idx)}
                     
-                    <div className="absolute top-0 left-1/2 -translate-x-1/2 cursor-ns-resize z-50 pointer-events-auto"
-                         style={{ width: '50%', height: hitW, transform: 'translateY(-50%)', backgroundColor: hitAreaColor }}
-                         onMouseDown={(e) => startResize(e, 't', label, idx)} />
-                    <div className="absolute bottom-0 left-1/2 -translate-x-1/2 cursor-ns-resize z-50 pointer-events-auto"
-                         style={{ width: '50%', height: hitW, transform: 'translateY(50%)', backgroundColor: hitAreaColor }}
-                         onMouseDown={(e) => startResize(e, 'b', label, idx)} />
-                    <div className="absolute left-0 top-1/2 -translate-y-1/2 cursor-ew-resize z-50 pointer-events-auto"
-                         style={{ height: '50%', width: hitW, transform: 'translateX(-50%)', backgroundColor: hitAreaColor }}
-                         onMouseDown={(e) => startResize(e, 'l', label, idx)} />
-                    <div className="absolute right-0 top-1/2 -translate-y-1/2 cursor-ew-resize z-50 pointer-events-auto"
-                         style={{ height: '50%', width: hitW, transform: 'translateX(50%)', backgroundColor: hitAreaColor }}
-                         onMouseDown={(e) => startResize(e, 'r', label, idx)} />
+                    {/* Edges */}
+                    {renderEdgeHandle('t', 'ns', { top: 0, left: '50%', width: '60%', height: hitW, transform: 'translate(-50%, -50%)' }, label, idx)}
+                    {renderEdgeHandle('b', 'ns', { bottom: 0, left: '50%', width: '60%', height: hitW, transform: 'translate(-50%, 50%)' }, label, idx)}
+                    {renderEdgeHandle('l', 'ew', { left: 0, top: '50%', height: '60%', width: hitW, transform: 'translate(-50%, -50%)' }, label, idx)}
+                    {renderEdgeHandle('r', 'ew', { right: 0, top: '50%', height: '60%', width: hitW, transform: 'translate(50%, -50%)' }, label, idx)}
                   </>
                 )}
               </div>

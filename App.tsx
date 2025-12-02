@@ -634,18 +634,36 @@ const App: React.FC = () => {
     if (!isBatchActive || !backendConnected || isBackgroundProcessing || filteredImages.length === 0) return;
 
     const findNextCandidate = () => {
-        for (let i = 0; i < batchSettings.lookahead; i++) {
-            const targetIdx = currentImageIdx + i;
-            if (targetIdx >= filteredImages.length) break;
+        // Implements "Page/Batch" lookahead logic requested:
+        // Only request the next batch when we reach the end (last 5) of the current batch.
+        const batchSize = batchSettings.lookahead;
+        // Determines the "page" of images we are in
+        const currentBatchStart = Math.floor(currentImageIdx / batchSize) * batchSize;
+        
+        // Trigger condition: Are we near the end of the current batch? (last 5 images)
+        const triggerThreshold = Math.max(0, batchSize - 5);
+        const indexInBatch = currentImageIdx % batchSize;
+        
+        // Default range: Just the current batch
+        let searchEnd = currentBatchStart + batchSize;
 
-            const img = filteredImages[targetIdx];
+        // If we crossed the threshold, extend range to include NEXT batch
+        if (indexInBatch >= triggerThreshold) {
+            searchEnd += batchSize;
+        }
+
+        // Iterate forward from current position to find missing predictions
+        for (let i = currentImageIdx; i < searchEnd; i++) {
+            if (i >= filteredImages.length) break;
+
+            const img = filteredImages[i];
             const key = img.name.replace(/\.[^/.]+$/, "");
             
             // Skip images marked as failed
             if (skippedImages.has(key)) continue;
 
             if (!predictionsCache.has(key)) {
-                return { idx: targetIdx, img };
+                return { idx: i, img };
             }
         }
         return null;
