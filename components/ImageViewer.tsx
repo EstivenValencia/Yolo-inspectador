@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { YoloLabel, ImageAsset } from '../types';
 import { getColor, getModelColor } from '../utils/yoloHelper';
@@ -41,6 +40,9 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
   const [isPanning, setIsPanning] = useState(false);
   const [resizing, setResizing] = useState<ResizeHandle>(null);
   
+  // Local state for smooth dragging without saving on every frame
+  const [activeEdit, setActiveEdit] = useState<{ index: number, label: YoloLabel } | null>(null);
+
   // Creation State
   const [creationStart, setCreationStart] = useState<{x: number, y: number} | null>(null);
   const [ghostBox, setGhostBox] = useState<{x: number, y: number, w: number, h: number} | null>(null);
@@ -75,6 +77,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
     setTransform({ scale: 1, x: 0, y: 0 });
     setCreationStart(null);
     setGhostBox(null);
+    setActiveEdit(null);
   }, [image.url]);
 
   useEffect(() => {
@@ -153,6 +156,10 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
     focusViewer();
     onSelectLabel(idx);
     setResizing(handle);
+    
+    // Initialize active edit state for smooth local updates
+    setActiveEdit({ index: idx, label: { ...label } });
+
     startDrag.current = {
       ...startDrag.current,
       mouseX: e.clientX,
@@ -180,7 +187,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
           return;
       }
 
-      // 2. RESIZING
+      // 2. RESIZING / MOVING (LOCAL UPDATE)
       if (resizing && contentRef.current) {
         e.preventDefault();
         const { width: contentW, height: contentH } = contentRef.current.getBoundingClientRect();
@@ -196,7 +203,8 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
         if (resizing === 'move') {
             const newX = Math.max(0, Math.min(1, start.x + deltaX));
             const newY = Math.max(0, Math.min(1, start.y + deltaY));
-            onUpdateLabel({ ...start, x: newX, y: newY }, idx);
+            // Update local state only
+            setActiveEdit({ index: idx, label: { ...start, x: newX, y: newY } });
             return;
         }
 
@@ -227,7 +235,8 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
         const newX = newLeft + newW / 2;
         const newY = newTop + newH / 2;
 
-        onUpdateLabel({ ...start, x: newX, y: newY, w: newW, h: newH }, idx);
+        // Update local state only
+        setActiveEdit({ index: idx, label: { ...start, x: newX, y: newY, w: newW, h: newH } });
         return;
       }
 
@@ -245,6 +254,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
     };
 
     const handleMouseUp = () => {
+      // Commit Creation
       if (isCreating && creationStart && ghostBox && onCreateLabel) {
           const centerX = ghostBox.x + ghostBox.w / 2;
           const centerY = ghostBox.y + ghostBox.h / 2;
@@ -262,6 +272,12 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
           setGhostBox(null);
       }
 
+      // Commit Resize/Move to Parent (Disk Save)
+      if (resizing && activeEdit && onUpdateLabel) {
+          onUpdateLabel(activeEdit.label, activeEdit.index);
+      }
+      
+      setActiveEdit(null);
       setResizing(null);
       setIsPanning(false);
     };
@@ -275,29 +291,15 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [resizing, isPanning, transform, onUpdateLabel, isCreating, creationStart, ghostBox, onCreateLabel]);
+  }, [resizing, isPanning, transform, onUpdateLabel, isCreating, creationStart, ghostBox, onCreateLabel, activeEdit]);
 
   // --- DYNAMIC SCALING CALCULATIONS ---
-  // To solve the issue where clicking lines is hard when zoomed out/in,
-  // we calculate sizes that are inversely proportional to scale.
-  // This ensures a "constant screen size" for handles and hit areas.
   const scaleFactor = transform.scale;
-  
-  // Hit area should be roughly 20px on screen regardless of zoom
-  // We divide by scaleFactor because these pixels are inside the scaled container.
-  // 20px (screen) / scale = Xpx (internal)
   const hitAreaSize = 20 / scaleFactor; 
-  
-  // Visual border width: 2px on screen normal, 3px selected
   const visualBorderBase = 2 / scaleFactor;
   const visualBorderSelected = 3 / scaleFactor;
-
-  // Handles: 10px on screen
   const handleSize = 10 / scaleFactor;
   const handleOffset = -(handleSize / 2);
-
-  // Use a nearly transparent color for hit areas to ensure they capture events 
-  // even in gaps of dashed lines or when backgrounds are technically transparent.
   const hitAreaColor = 'rgba(255, 255, 255, 0.01)';
 
   return (
@@ -343,7 +345,10 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
         />
         
         <div className="absolute inset-0 pointer-events-none">
-          {labels.map((label, idx) => {
+          {labels.map((propLabel, idx) => {
+            // Check if we are currently dragging/editing this label locally
+            const label = (activeEdit && activeEdit.index === idx) ? activeEdit.label : propLabel;
+
             if (label.isPredicted && !showModelLabels) return null;
             if (!label.isPredicted && !labelsVisible) return null;
 
@@ -358,7 +363,6 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
             
             const color = isPending ? 'white' : (label.isPredicted ? getModelColor(label.classId) : getColor(label.classId));
             
-            // Dynamic widths based on scale
             const borderW = isSelected ? visualBorderSelected : visualBorderBase;
             const hitW = hitAreaSize;
 
@@ -398,24 +402,12 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                   />
                 )}
 
-                {/* --- BORDERS (HIT AREAS & VISUALS) --- */}
-                {/* 
-                   We use a container div as the HIT AREA. 
-                   It has a very slight background color to ensure it captures mouse events 
-                   even if the inner line is dashed/dotted and has gaps.
-                   Inverse scaling (hitW) ensures it's always easy to grab.
-                */}
-                
+                {/* HIT AREAS & BORDERS */}
                 {/* TOP */}
                 <div 
                   onMouseDown={(e) => startResize(e, 'move', label, idx)}
                   className="absolute top-0 left-0 w-full flex items-center justify-center cursor-move pointer-events-auto"
-                  style={{ 
-                      height: hitW, 
-                      transform: 'translateY(-50%)', 
-                      zIndex: 20,
-                      backgroundColor: hitAreaColor
-                  }}
+                  style={{ height: hitW, transform: 'translateY(-50%)', zIndex: 20, backgroundColor: hitAreaColor }}
                 >
                     <div className="w-full" style={{ 
                         height: borderW, 
@@ -428,12 +420,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                 <div 
                   onMouseDown={(e) => startResize(e, 'move', label, idx)}
                   className="absolute bottom-0 left-0 w-full flex items-center justify-center cursor-move pointer-events-auto"
-                  style={{ 
-                      height: hitW, 
-                      transform: 'translateY(50%)', 
-                      zIndex: 20,
-                      backgroundColor: hitAreaColor
-                  }}
+                  style={{ height: hitW, transform: 'translateY(50%)', zIndex: 20, backgroundColor: hitAreaColor }}
                 >
                     <div className="w-full" style={{ 
                         height: borderW, 
@@ -446,12 +433,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                 <div 
                   onMouseDown={(e) => startResize(e, 'move', label, idx)}
                   className="absolute top-0 left-0 h-full flex items-center justify-center cursor-move pointer-events-auto"
-                  style={{ 
-                      width: hitW, 
-                      transform: 'translateX(-50%)', 
-                      zIndex: 20,
-                      backgroundColor: hitAreaColor
-                  }}
+                  style={{ width: hitW, transform: 'translateX(-50%)', zIndex: 20, backgroundColor: hitAreaColor }}
                 >
                     <div className="h-full" style={{ 
                         width: borderW, 
@@ -464,12 +446,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                 <div 
                   onMouseDown={(e) => startResize(e, 'move', label, idx)}
                   className="absolute top-0 right-0 h-full flex items-center justify-center cursor-move pointer-events-auto"
-                  style={{ 
-                      width: hitW, 
-                      transform: 'translateX(50%)', 
-                      zIndex: 20,
-                      backgroundColor: hitAreaColor
-                  }}
+                  style={{ width: hitW, transform: 'translateX(50%)', zIndex: 20, backgroundColor: hitAreaColor }}
                 >
                     <div className="h-full" style={{ 
                         width: borderW, 
@@ -478,19 +455,19 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                     }} />
                 </div>
 
-                {/* LABEL TAG - Made Interactive (Click to Move) */}
+                {/* LABEL TAG */}
                 {(isSelected || width > 0) && (
                    <div 
                     onMouseDown={(e) => startResize(e, 'move', label, idx)}
                     className={`absolute left-0 font-bold whitespace-nowrap rounded shadow-sm pointer-events-auto cursor-pointer transform hover:scale-105 transition-transform ${isPending ? 'bg-white text-black' : 'bg-black/75 text-white'}`}
                     style={{ 
-                        zIndex: 60, // Higher than handles
-                        fontSize: `${11 / scaleFactor}px`, // Slight reduction
+                        zIndex: 60,
+                        fontSize: `${11 / scaleFactor}px`,
                         padding: `${2 / scaleFactor}px ${6 / scaleFactor}px`,
                         borderLeft: `${4 / scaleFactor}px solid ${color}`,
                         ...(label.isPredicted 
-                            ? { top: '100%', marginTop: `${8/scaleFactor}px`, origin: 'top left' } // Increased margin to avoid overlap
-                            : { bottom: '100%', marginBottom: `${8/scaleFactor}px`, origin: 'bottom left' } // Increased margin to avoid overlap
+                            ? { top: '100%', marginTop: `${8/scaleFactor}px`, origin: 'top left' }
+                            : { bottom: '100%', marginBottom: `${8/scaleFactor}px`, origin: 'bottom left' }
                         )
                     }}
                    >
@@ -498,7 +475,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                    </div>
                 )}
 
-                {/* RESIZE HANDLES (Corners and Edges) - Only when selected and not pending */}
+                {/* RESIZE HANDLES - Only when selected and not pending */}
                 {isSelected && !isPending && (
                   <>
                     <div className="absolute bg-white border border-black cursor-nwse-resize z-50 rounded-sm pointer-events-auto shadow-sm hover:scale-125 transition-transform"
@@ -514,7 +491,6 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                          style={{ bottom: handleOffset, right: handleOffset, width: handleSize, height: handleSize }}
                          onMouseDown={(e) => startResize(e, 'br', label, idx)} />
                     
-                    {/* Edge Resizers - Use hitW for easy gripping */}
                     <div className="absolute top-0 left-1/2 -translate-x-1/2 cursor-ns-resize z-50 pointer-events-auto"
                          style={{ width: '50%', height: hitW, transform: 'translateY(-50%)', backgroundColor: hitAreaColor }}
                          onMouseDown={(e) => startResize(e, 't', label, idx)} />

@@ -55,6 +55,10 @@ const App: React.FC = () => {
   const [isResizing, setIsResizing] = useState(false);
   const [filterClassId, setFilterClassId] = useState<number>(-1); 
   
+  // Ref to track logic changes without unnecessary re-renders or resets
+  const lastImageNameRef = useRef<string>('');
+  const lastFilterRef = useRef<number>(-1);
+
   // View Mode & Grid Config
   const [viewMode, setViewMode] = useState<'single' | 'grid'>('single');
   const [gridMode, setGridMode] = useState<'normal' | 'zoom'>('normal'); 
@@ -376,6 +380,7 @@ const App: React.FC = () => {
   }, [classes, classSearchTerm, classUsage]);
 
 
+  // IMPORTANT: Split logic to avoid resetting label index when data updates but image stays the same.
   useEffect(() => {
     if (!isSetup || filteredImages.length === 0) {
       setCurrentLabels([]);
@@ -383,6 +388,7 @@ const App: React.FC = () => {
       return;
     }
 
+    // Ensure valid index
     const effectiveIdx = Math.min(currentImageIdx, filteredImages.length - 1);
     if (effectiveIdx !== currentImageIdx) {
         setCurrentImageIdx(effectiveIdx);
@@ -406,39 +412,54 @@ const App: React.FC = () => {
     }
 
     // 3. Get RAM Cache (Latest Predictions)
-    // IMPORTANT: Check if key exists in cache map, not just if length > 0.
-    // This allows clearing predictions (empty array) to take precedence over disk.
     let effectiveModelLabels = modelLabelsFromDisk;
     if (predictionsCache.has(key)) {
         effectiveModelLabels = predictionsCache.get(key)!;
     }
 
     const mergedLabels = [...manualLabels, ...effectiveModelLabels];
-    
     setCurrentLabels(mergedLabels);
-    setPendingLabelIndex(null); 
     
-    setIsCreating(false);
-    setShowClassSelector(false);
+    // --- SMART NAVIGATION LOGIC ---
+    // Detect if we switched image OR switched filter. If so, reset logic applies.
+    // If it's the same image and same filter, but data changed (save/delete), preserve index.
+    const isNewImage = key !== lastImageNameRef.current;
+    const isNewFilter = filterClassId !== lastFilterRef.current;
 
-    if (mergedLabels.length > 0) {
-       if (filterClassId !== -1 && filterClassId !== -2) {
-          const matchIdx = mergedLabels.findIndex(l => l.classId === filterClassId);
-          if (matchIdx !== -1) {
-            setCurrentLabelIdx(matchIdx);
-          } else {
-             setCurrentLabelIdx(0);
-          }
-       } else {
-           if (currentLabelIdx >= mergedLabels.length || currentLabelIdx < 0) {
-             setCurrentLabelIdx(0);
+    if (isNewImage || isNewFilter) {
+        // RESET LOGIC
+        setPendingLabelIndex(null); 
+        setIsCreating(false);
+        setShowClassSelector(false);
+
+        if (mergedLabels.length > 0) {
+           if (filterClassId !== -1 && filterClassId !== -2) {
+              // Jump to first label matching filter
+              const matchIdx = mergedLabels.findIndex(l => l.classId === filterClassId);
+              setCurrentLabelIdx(matchIdx !== -1 ? matchIdx : 0);
+           } else {
+              setCurrentLabelIdx(0);
            }
-       }
+        } else {
+          setCurrentLabelIdx(-1);
+        }
+        
+        lastImageNameRef.current = key;
+        lastFilterRef.current = filterClassId;
+
     } else {
-      setCurrentLabelIdx(-1);
+        // UPDATE LOGIC (Data changed, same image context)
+        // Ensure index is within bounds of new data
+        if (mergedLabels.length === 0) {
+            setCurrentLabelIdx(-1);
+        } else if (currentLabelIdx >= mergedLabels.length) {
+            setCurrentLabelIdx(mergedLabels.length - 1);
+        }
+        // Else keep currentLabelIdx as is
     }
     
     setLastSaveStatus('idle');
+
   }, [currentImageIdx, filteredImages, labelsRaw, modelLabelsRaw, predictionsCache, isSetup, filterClassId, modelOutputHandle]);
 
 
@@ -487,7 +508,7 @@ const App: React.FC = () => {
       const hash = getLabelHash(label);
       const fullKey = `${imgKey}:${hash}`;
 
-      const newSet = new Set(reviewedLabels);
+      const newSet = new Set<string>(reviewedLabels);
       if (newSet.has(fullKey)) {
           newSet.delete(fullKey);
       } else {
@@ -535,7 +556,10 @@ const App: React.FC = () => {
                     return newMap;
                 });
             }
-            // DO NOT SAVE TO DISK for predictions until accepted
+            // If it's a prediction we usually just update RAM until accepted.
+            // BUT, if user is explicitly resizing it, we likely want to persist it if they save.
+            // However, typical workflow is Accept -> Save Manual.
+            // If we allow editing predictions, we should probably update them in cache.
         } else {
              // It's a manual label: Save to disk immediately
              updateRawDataAndSave(newLabels);
@@ -585,7 +609,7 @@ const App: React.FC = () => {
         });
         
         // Clear failure count on success
-        setFailureCounts(prev => {
+        setFailureCounts((prev: Map<string, number>) => {
             const newMap = new Map(prev);
             newMap.delete(key);
             return newMap;
@@ -594,7 +618,7 @@ const App: React.FC = () => {
     } catch (e) {
         console.error("Inference failed", e);
         const key = currentImg.name.replace(/\.[^/.]+$/, "");
-        setFailureCounts(prev => {
+        setFailureCounts((prev: Map<string, number>) => {
              const newMap = new Map(prev);
              const count = (newMap.get(key) || 0) + 1;
              newMap.set(key, count);
@@ -653,7 +677,7 @@ const App: React.FC = () => {
                      });
                      
                      // Reset failure count on success
-                     setFailureCounts(prev => {
+                     setFailureCounts((prev: Map<string, number>) => {
                         const newMap = new Map(prev);
                         newMap.delete(key);
                         return newMap;
@@ -664,15 +688,15 @@ const App: React.FC = () => {
                      const key = img.name.replace(/\.[^/.]+$/, "");
                      
                      // Failure logic: Retry up to 2 times then skip
-                     setFailureCounts(prev => {
+                     setFailureCounts((prev: Map<string, number>) => {
                          const newMap = new Map(prev);
                          const count = (newMap.get(key) || 0) + 1;
                          newMap.set(key, count);
                          
                          if (count >= 2) {
                              console.log(`Skipping image ${img.name} after ${count} failures.`);
-                             setSkippedImages(prevSet => {
-                                 const newSet = new Set(prevSet);
+                             setSkippedImages((prevSet: Set<string>) => {
+                                 const newSet = new Set<string>(prevSet);
                                  newSet.add(key);
                                  return newSet;
                              });
@@ -688,28 +712,41 @@ const App: React.FC = () => {
   }, [isBatchActive, backendConnected, isBackgroundProcessing, currentImageIdx, filteredImages, batchSettings, predictionsCache, inferenceConfig, skippedImages]);
 
 
-  const handleAcceptPredictions = () => {
+  const handleAcceptSelectedPrediction = () => {
       const currentImg = filteredImages[currentImageIdx];
       if (!currentImg) return;
       
       const key = currentImg.name.replace(/\.[^/.]+$/, "");
+      
+      // Only process the CURRENTLY SELECTED label
+      const selectedLabel = currentLabels[currentLabelIdx];
+      if (!selectedLabel || !selectedLabel.isPredicted) return;
 
-      const newLabels = currentLabels.map(l => {
-          if (l.isPredicted) {
-              const { isPredicted, ...rest } = l;
-              return rest;
-          }
-          return l;
-      });
+      // Create a copy of labels
+      const newLabels = [...currentLabels];
+      
+      // Convert the selected label to manual
+      const { isPredicted, confidence, ...rest } = selectedLabel;
+      const manualLabel = rest as YoloLabel;
+      
+      newLabels[currentLabelIdx] = manualLabel;
 
+      // Update Predictions Cache (Remove this specific accepted prediction from cache, keep others)
+      const remainingPredictions = newLabels.filter(l => l.isPredicted);
+      
       setPredictionsCache(prev => {
           const newMap = new Map(prev);
-          newMap.delete(key);
+          if (remainingPredictions.length > 0) {
+            newMap.set(key, remainingPredictions);
+          } else {
+            newMap.delete(key);
+          }
           return newMap;
       });
 
       setCurrentLabels(newLabels);
-      // Force save predictions is false because we just converted them to manual!
+      
+      // Save manual labels to disk
       updateRawDataAndSave(newLabels, false); 
   };
 
@@ -734,6 +771,14 @@ const App: React.FC = () => {
           const newLabels = [...currentLabels];
           newLabels.splice(currentLabelIdx, 1);
           
+          // Manually update index before saving/triggering effects to avoid jumps
+          if (newLabels.length > 0) {
+              const newIdx = Math.max(0, currentLabelIdx - 1);
+              setCurrentLabelIdx(newIdx);
+          } else {
+              setCurrentLabelIdx(-1);
+          }
+
           if (labelToDelete.isPredicted) {
                // Update cache only, do NOT save to disk
                const currentImg = filteredImages[currentImageIdx];
@@ -750,13 +795,6 @@ const App: React.FC = () => {
           }
 
           setCurrentLabels(newLabels);
-          
-          if (newLabels.length > 0) {
-              const newIdx = Math.max(0, currentLabelIdx - 1);
-              setCurrentLabelIdx(newIdx);
-          } else {
-              setCurrentLabelIdx(-1);
-          }
       }
   };
 
@@ -1013,7 +1051,7 @@ const App: React.FC = () => {
             
             case 'y': 
                 e.preventDefault();
-                handleAcceptPredictions();
+                handleAcceptSelectedPrediction();
                 break;
 
             case 'r': 
@@ -1073,6 +1111,8 @@ const App: React.FC = () => {
 
   const currentImage = filteredImages[currentImageIdx];
   const pendingPredictionsCount = currentLabels.filter(l => l.isPredicted).length;
+  // Check if current label is predicted for the Accept Button
+  const isCurrentSelectionPredicted = currentLabels[currentLabelIdx]?.isPredicted;
 
   return (
     <div className="h-screen w-screen flex flex-col bg-slate-950 overflow-hidden relative">
@@ -1180,13 +1220,14 @@ const App: React.FC = () => {
                 )}
              </div>
             
-             {pendingPredictionsCount > 0 && viewMode === 'single' && (
+             {/* Accept Selected Prediction Button */}
+             {isCurrentSelectionPredicted && viewMode === 'single' && (
                  <button 
-                    onClick={handleAcceptPredictions}
+                    onClick={handleAcceptSelectedPrediction}
                     className="flex items-center gap-2 px-3 py-1.5 rounded text-xs font-bold transition-all border bg-amber-900/50 border-amber-500 text-amber-300 hover:bg-amber-900 animate-pulse"
                  >
                     <FileCheck size={14} />
-                    {pendingPredictionsCount} {t.app.unsaved}
+                    {t.app.help.confirmPred} (Y)
                  </button>
              )}
 
